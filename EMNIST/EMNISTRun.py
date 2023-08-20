@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 100
 BATCH_SIZE = 5000
-RUNS = 50
+RUNS = 10000
 DATASET = 'EMNIST'
 METRIC_TEST = 'Accuracy'
 LEARNING_RATE = 5e-3

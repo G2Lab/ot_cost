@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 75
 BATCH_SIZE = 2000
-RUNS = 50
+RUNS = 10000
 DATASET = 'Weather'
 METRIC_TEST = 'R2'
 LEARNING_RATE = 1e-2

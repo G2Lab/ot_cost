@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 500
 BATCH_SIZE = 256
-RUNS = 50
+RUNS = 10000
 DATASET = 'CIFAR'
 METRIC_TEST = 'Accuracy'
 LEARNING_RATE = 1e-3

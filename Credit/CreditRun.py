@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS = 50
 BATCH_SIZE = 2000
-RUNS = 1000
+RUNS = 10000
 DATASET = 'Credit'
 METRIC_TEST = 'AUPRC'
 LEARNING_RATE = 5e-2

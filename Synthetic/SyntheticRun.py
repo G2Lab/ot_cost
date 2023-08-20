@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 50
 BATCH_SIZE = 2000
-RUNS = 1000
+RUNS = 10000
 DATASET = 'Synthetic'
 METRIC_TEST = 'AUC'
 LEARNING_RATE = 1e-1

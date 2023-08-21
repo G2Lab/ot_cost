@@ -29,21 +29,28 @@ class AbstractDatasetHandler(ABC):
         pass
 
 class TabularDatasetHandler(AbstractDatasetHandler):
-    def preprocess_data(self, X, y):
-        X_tensor, y_tensor = torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
-        scaler = StandardScaler()
-        X_tensor = torch.tensor(scaler.fit_transform(X_tensor), dtype=torch.float32)
-        if self.dataset_name == 'Weather':
-            y_tensor = torch.tensor(scaler.fit_transform(y_tensor.reshape(-1, 1)), dtype=torch.float32)
-        return X_tensor, y_tensor
+    def __init__(self, dataset_name):
+        super().__init__(dataset_name)
+        self.scaler = StandardScaler()
+    def preprocess_data(self, dataloader, fit_transform = False):
+        X_tensor, y_tensor = dataloader.dataset.tensors
+        X_np, y_np = X_tensor.numpy(), y_tensor.numpy()
+        
+        if fit_transform:
+            X_tensor = torch.tensor(self.scaler.fit_transform(X_np), dtype=torch.float32)
+            if self.dataset_name == 'Weather':
+                y_tensor = torch.tensor(self.scaler.fit_transform(y_np.reshape(-1, 1)), dtype=torch.float32)
+        else:
+            X_tensor = torch.tensor(self.scaler.transform(X_np), dtype=torch.float32)
+            if self.dataset_name == 'Weather':
+                y_tensor = torch.tensor(self.scaler.transform(y_np.reshape(-1, 1)), dtype=torch.float32)       
+        return TensorDataset(X_tensor, y_tensor)
     
 class ImageDatasetHandler(AbstractDatasetHandler):
-    def preprocess_data(self, X, y):
-        if self.dataset_name in ['EMNIST','CIFAR']:
-            X_tensor, y_tensor = torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
-            if self.dataset_name == 'EMNIST':
+    def preprocess_data(self, X, y, fit_transform = False):
+        if self.dataset_name == 'EMNIST':
                 X_tensor.unsqueeze_(1)
-            elif self.dataset_name == 'CIFAR':
+        elif self.dataset_name == 'CIFAR':
                 transform = transforms.Compose([
                                                 transforms.ToPILImage(),
                                                 transforms.Resize((224, 224)),
@@ -69,19 +76,24 @@ class DataPreprocessor:
         self.handler = get_dataset_handler(self.dataset)
 
     def preprocess(self, X, y):
-        # Using the handler to preprocess the data
-        X_tensor, y_tensor = self.handler.preprocess_data(X, y)
-        train_data, val_data, test_data = self.split(X_tensor, y_tensor) 
+        if self.dataset in DATASET_TYPES_TABULAR:
+            X_tensor, y_tensor = torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+            train_data, val_data, test_data = self.split(X_tensor, y_tensor) 
+            train_data = self.handler.preprocess_data(train_data, fit_transform= True)
+            val_data = self.handler.preprocess_data(val_data, fit_transform= False)
+            test_data = self.handler.preprocess_data(test_data, fit_transform= False)
+        elif self.dataset in DATASET_TYPES_IMAGE:
+            X_tensor, y_tensor = self.handler.preprocess_data(X, y)
+            train_data, val_data, test_data = self.split(X_tensor, y_tensor) 
         return self.create_dataloaders(train_data, val_data, test_data)
     
-    def split(self, X_tensor, y_tensor, test_size=0.2, val_size = 0.2):
-        full_dataset = TensorDataset(X_tensor, y_tensor)
-        test_size = int(test_size * len(full_dataset))
-        train_val_size = len(full_dataset) - test_size
-        val_size = int(val_size * train_val_size)
-        train_size = train_val_size - val_size
-        train_data, test_data = random_split(full_dataset, [train_val_size, test_size])
-        train_data, val_data = random_split(train_data, [train_size, val_size])
+    def split(self, X, y, test_size=0.2, val_size = 0.2):
+        full_dataset = TensorDataset(X, y)
+        n = len(full_dataset)
+        test_size = int(test_size * n)
+        val_size = int(val_size * (n - test_size))
+        train_size = n - test_size - val_size
+        train_data, val_data, test_data = random_split(full_dataset, [train_size, val_size, test_size])
         return train_data, val_data, test_data
     
     def create_dataloaders(self, train_data, val_data, test_data):
@@ -96,4 +108,3 @@ class DataPreprocessor:
         train_loader_combined = torch.utils.data.DataLoader(train_combined, batch_size=self.batch_size, shuffle=True)
         val_loader_combined = torch.utils.data.DataLoader(val_combined, batch_size=self.batch_size, shuffle=False)
         return train_loader_combined, val_loader_combined
-    

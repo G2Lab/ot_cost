@@ -18,26 +18,27 @@ from multiprocessing import Pool
 from torch.optim.lr_scheduler import ExponentialLR
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EPOCHS = 50
+EPOCHS = 200
 BATCH_SIZE = 2000
 RUNS = 10000
 DATASET = 'Credit'
 METRIC_TEST = 'AUPRC'
-LEARNING_RATE = 5e-2
+LEARNING_RATE =  8e-3
 
 
 ##FF model
 class Feedforward(torch.nn.Module):
-        def __init__(self, input_size, hidden_size):
+        def __init__(self, input_size):
                 super(Feedforward, self).__init__()
                 self.input_size = input_size
-                self.hidden_size  = hidden_size
+                self.hidden_size  = [128,128, 56, 12]
                 self.fc = nn.Sequential(
                         nn.Linear(self.input_size, self.hidden_size[0]),
                         nn.ReLU(),
+                        nn.Dropout(0.3),
                         nn.Linear(self.hidden_size[0], self.hidden_size[1]),
                         nn.ReLU(),
-                        nn.Dropout(0.5),
+                        nn.Dropout(0.3),
                         nn.Linear(self.hidden_size[1], self.hidden_size[2]),
                         nn.ReLU(),
                         nn.Linear(self.hidden_size[2], self.hidden_size[3]),
@@ -57,11 +58,11 @@ class Feedforward(torch.nn.Module):
                 return output
         
 def createModel():
-    model = Feedforward(28, [56,56, 28, 12])
+    model = Feedforward(28)
     model.to(DEVICE)
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
-    lr_scheduler = ExponentialLR(optimizer, gamma=0.9)
+    lr_scheduler = ExponentialLR(optimizer, gamma=0.8)
     return model, criterion, optimizer, lr_scheduler
 
 

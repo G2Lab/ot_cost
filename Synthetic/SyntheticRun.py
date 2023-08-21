@@ -17,12 +17,12 @@ import pickle
 from multiprocessing import Pool
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 50
+EPOCHS = 300
 BATCH_SIZE = 2000
-RUNS = 10000
+RUNS = 50
 DATASET = 'Synthetic'
 METRIC_TEST = 'AUC'
-LEARNING_RATE = 1e-1
+LEARNING_RATE = 5e-2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -31,25 +31,31 @@ class Feedforward(torch.nn.Module):
         def __init__(self, input_size):
                 super(Feedforward, self).__init__()
                 self.input_size = input_size
-                self.fc = torch.nn.Sequential(nn.Linear(self.input_size, 1))
+                self.hidden_size = [56, 6]
+                self.fc = torch.nn.Sequential(nn.Linear(self.input_size, self.hidden_size[0]),
+                                                nn.ReLU(),
+                                                nn.Dropout(0.3),
+                                                nn.Linear(self.hidden_size[0], self.hidden_size[1]),
+                                                nn.ReLU(),
+                                                nn.Linear(self.hidden_size[1], 1))
                 self.sigmoid = torch.nn.Sigmoid()
-
                 for layer in self.fc:
-                    if isinstance(layer, nn.Linear):
-                            nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-                            nn.init.constant_(layer.bias, 0)
+                        if isinstance(layer, nn.Linear):
+                                nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
+                                nn.init.constant_(layer.bias, 0)
 
         def forward(self, x):
                 output = self.fc(x)
                 output = self.sigmoid(output)
                 return output
         
+        
 def createModel():
-    model = Feedforward(12)
+    model = Feedforward()
     model.to(DEVICE)
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
-    lr_scheduler = ExponentialLR(optimizer, gamma=0.9)
+    lr_scheduler = ExponentialLR(optimizer, gamma=0.8)
     return model, criterion, optimizer, lr_scheduler
 
 

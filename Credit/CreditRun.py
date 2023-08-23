@@ -9,10 +9,10 @@ import sys
 import numpy as np
 sys.path.append(f'{ROOT_DIR}/code/helper')
 import pipeline as pp
-import graph_results as gr
+import process_results as pr
 import importlib
 importlib.reload(pp)
-importlib.reload(gr)
+importlib.reload(pr)
 import pickle
 from multiprocessing import Pool
 from torch.optim.lr_scheduler import ExponentialLR
@@ -107,12 +107,9 @@ def main():
     with open(f'{path_save}/losses_2.pkl', 'wb') as f:
         pickle.dump(losses_df, f)
 
-    
-    ##Save graph
+    ##Process results and graph
     save = True
-    gr.grapher(DATASET, metrics_all, f'{METRIC_TEST}_2', cost, save)
-    gr.grapher(DATASET, test_losses_df, 'Loss_2', cost, save)
-    #gr.grapher_losses(DATASET, losses_df, costs, save)
+    pr.process_results(DATASET, METRIC_TEST, costs, save)
 
 
 

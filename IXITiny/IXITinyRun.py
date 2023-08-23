@@ -10,18 +10,18 @@ import numpy as np
 sys.path.append(f'{ROOT_DIR}/code/helper')
 import trainers as tr
 import pipeline as pp
-import graph_results as gr
+import process_results as pr
 import importlib
 importlib.reload(tr)
 importlib.reload(pp)
-importlib.reload(gr)
+importlib.reload(pr)
 import pickle
 from unet import UNet
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 50
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 RUNS = 50
 DATASET = 'IXITiny'
 METRIC_TEST = 'DICE'
@@ -126,12 +126,10 @@ def main():
     with open(f'{path_save}/losses.pkl', 'wb') as f:
         pickle.dump(losses_df, f)
 
-    
-    ##Save graph
+
+    ##Process results and graph
     save = True
-    gr.grapher(DATASET, metrics_all, METRIC_TEST, cost, save)
-    gr.grapher(DATASET, test_losses_df, 'Loss', cost, save)
-    gr.grapher_losses(DATASET, losses_df, costs, save)
+    pr.process_results(DATASET, METRIC_TEST, costs, save)
 
 if __name__ == '__main__':
     main()

@@ -147,7 +147,7 @@ def train_autoencoder(n_emb):
                     break
     
     best_model.to('cpu')
-    torch.save(best_model.state_dict(), f'{ROOT_DIR}/data/ISIC/model_checkpoint_en.pth')
+    torch.save(best_model.state_dict(), f'{ROOT_DIR}/data/ISIC/model_checkpoint.pth')
     return train_losses, val_losses
 
 

@@ -16,12 +16,12 @@ import pickle
 from torchvision import models
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 500
+EPOCHS = 50
 BATCH_SIZE = 256
-RUNS = 10000
+RUNS = 75
 DATASET = 'CIFAR'
 METRIC_TEST = 'Accuracy'
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 5e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CustomResNet18(nn.Module):
@@ -62,7 +62,7 @@ def createModel(mp):
     return model, criterion, optimizer, lr_scheduler
 
 
-def sample_per_class(labels, class_size = 500):
+def sample_per_class(labels, class_size = 100):
   df = pd.DataFrame({'labels': labels})
   df_stratified = df.groupby('labels').apply(lambda x: x.sample(class_size, replace=False))
   ind = df_stratified.index.get_level_values(1)
@@ -106,7 +106,7 @@ def main():
         losses[c] = loss
         metrics_all = pd.concat([metrics_all, metrics], axis=0)
     metrics_all.reset_index(inplace = True, drop = True)
-    losses_df, test_losses_df = pp.loss_dictionary_to_dataframe(losses, costs)
+    losses_df, test_losses_df = pp.loss_dictionary_to_dataframe(losses, costs, RUNS)
     
 
     ##Save results

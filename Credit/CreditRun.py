@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS = 200
 BATCH_SIZE = 2000
-RUNS = 10000
+RUNS = 500
 DATASET = 'Credit'
 METRIC_TEST = 'AUPRC'
 LEARNING_RATE =  8e-3
@@ -69,7 +69,7 @@ def createModel():
 def loadData(dataset, cost):
     ##load data
     X = pd.read_csv(f'{ROOT_DIR}/data/{DATASET}/data_{dataset}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(29)])
-    X = X.sample(300)
+    X = X.sample(150)
     ##get X and label
     y = X.iloc[:,-1]
     X = X.iloc[:,:-1]
@@ -100,21 +100,20 @@ def main():
     
 
     ##Save results
-    '''
     path_save = f'{ROOT_DIR}/results/{DATASET}'
     cost = f'{costs[0]}-{costs[-1]}'
-    metrics_all.to_csv(f'{path_save}/{METRIC_TEST}_{cost}.csv', index=False)
-    test_losses_df.to_csv(f'{path_save}/losses_{cost}.csv', index=False)
-    with open(f'{path_save}/losses.pkl', 'wb') as f:
+    metrics_all.to_csv(f'{path_save}/{METRIC_TEST}_{cost}_2.csv', index=False)
+    test_losses_df.to_csv(f'{path_save}/losses_{cost}_2.csv', index=False)
+    with open(f'{path_save}/losses_2.pkl', 'wb') as f:
         pickle.dump(losses_df, f)
 
     
     ##Save graph
     save = True
-    gr.grapher(DATASET, metrics_all, METRIC_TEST, cost, save)
-    gr.grapher(DATASET, test_losses_df, 'Loss', cost, save)
-    gr.grapher_losses(DATASET, losses_df, costs, save)
-    '''
+    gr.grapher(DATASET, metrics_all, f'{METRIC_TEST}_2', cost, save)
+    gr.grapher(DATASET, test_losses_df, 'Loss_2', cost, save)
+    #gr.grapher_losses(DATASET, losses_df, costs, save)
+
 
 
 if __name__ == '__main__':

@@ -107,9 +107,7 @@ class ModelPipeline:
         self.SINGLE = True
         model, criterion, optimizer, lr_scheduler = self.createModelFunc
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader_1, val_loader_1, test_loader = dataloader.preprocess(X1, y1)
-        train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
-        train_loader, val_loader = dataloader.combine(train_loader_1, train_loader_2, val_loader_1, val_loader_2)
+        train_loader, val_loader, test_loader = dataloader.preprocess_joint(X1, y1, X2, y2)
         run_pipeline = tr.ModelTrainer(self.DATASET, model, optimizer, criterion, lr_scheduler, self.DEVICE)
 
         epoch = 0

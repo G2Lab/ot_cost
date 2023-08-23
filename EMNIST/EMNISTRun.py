@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 100
 BATCH_SIZE = 5000
-RUNS = 10000
+RUNS = 100
 DATASET = 'EMNIST'
 METRIC_TEST = 'Accuracy'
 LEARNING_RATE = 5e-3
@@ -62,7 +62,6 @@ def createModel(mp):
         CLASSES = mp.SINGLE_CLASS
     else:
         CLASSES = mp.MSL_CLASS
-    print(CLASSES)
     model = LeNet5(CLASSES)
     model.to(DEVICE)
     criterion = nn.CrossEntropyLoss()
@@ -71,7 +70,7 @@ def createModel(mp):
     return model, criterion, optimizer, lr_scheduler
 
 
-def sample_per_class(labels, class_size = 500):
+def sample_per_class(labels, class_size = 100):
   df = pd.DataFrame({'labels': labels})
   df_stratified = df.groupby('labels').apply(lambda x: x.sample(class_size, replace=False))
   ind = df_stratified.index.get_level_values(1)

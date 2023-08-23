@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 300
 BATCH_SIZE = 2000
-RUNS = 50
+RUNS = 500
 DATASET = 'Synthetic'
 METRIC_TEST = 'AUC'
 LEARNING_RATE = 5e-2
@@ -28,9 +28,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ##FF model
 class Feedforward(torch.nn.Module):
-        def __init__(self, input_size):
+        def __init__(self):
                 super(Feedforward, self).__init__()
-                self.input_size = input_size
+                self.input_size = 12
                 self.hidden_size = [56, 6]
                 self.fc = torch.nn.Sequential(nn.Linear(self.input_size, self.hidden_size[0]),
                                                 nn.ReLU(),
@@ -62,7 +62,7 @@ def createModel():
 def loadData(dataset, cost):
     ##load data
     X = pd.read_csv(f'{ROOT_DIR}/data/{DATASET}/data_{dataset}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(13)])
-    X = X.sample(n = 200)
+    X = X.sample(n = 100)
 
     ##get X and label
     y = X.iloc[:,-1]

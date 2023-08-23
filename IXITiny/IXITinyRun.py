@@ -20,9 +20,9 @@ from unet import UNet
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 500
-BATCH_SIZE = 64
-RUNS = 10000
+EPOCHS = 50
+BATCH_SIZE = 16
+RUNS = 50
 DATASET = 'IXITiny'
 METRIC_TEST = 'DICE'
 LEARNING_RATE = 5e-3
@@ -58,7 +58,6 @@ class UNetClassifier(nn.Module):
         self.initialize_weights()
         del unet
 
-
     def forward(self, x):
         #unet has been removed as we save the representation up until then
         logits = self.classifier(x)
@@ -80,9 +79,9 @@ def createModel():
     return model, criterion, optimizer, lr_scheduler
 
 def loadData(dataset, cost):
-    sites = {0.03: [['Guys'], ['HH']],
-             0.24: [['IOP'], ['Guys']],
-             0.28: [['IOP'], ['HH']]}
+    sites = {0.08: [['Guys'], ['HH']],
+             0.28: [['IOP'], ['Guys']],
+             0.30: [['IOP'], ['HH']]}
     site_names = sites[cost][dataset-1]
 
     image_dir = os.path.join(ROOT_DIR, 'data/IXITiny/representation')
@@ -92,7 +91,7 @@ def loadData(dataset, cost):
     for name in site_names:
             image_files.extend([f'{image_dir}/{file}' for file in os.listdir(image_dir) if name in file])
             label_files.extend([f'{label_dir}/{file}'  for file in os.listdir(label_dir) if name in file])
-    return image_files, label_files
+    return np.array(image_files), np.array(label_files)
 
 
 def run_model_for_cost(inputs):
@@ -104,11 +103,11 @@ def run_model_for_cost(inputs):
 
 def main():
      ##run model on datasets
-    costs = [0.03, 0.24, 0.28]
+    costs = [0.08, 0.28, 0.30]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
     for input in inputs:
-        results.append(pp.run_model_for_cost(input))
+        results.append(run_model_for_cost(input))
 
     losses = {}
     metrics_all = pd.DataFrame()

@@ -17,27 +17,30 @@ import pickle
 from multiprocessing import Pool
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 75
+EPOCHS = 100
 BATCH_SIZE = 2000
-RUNS = 10000
+RUNS = 500
 DATASET = 'Weather'
 METRIC_TEST = 'R2'
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 5e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ##FF model
 class Feedforward(torch.nn.Module):
-        def __init__(self, input_size, hidden_size):
+        def __init__(self, input_size):
                 super(Feedforward, self).__init__()
                 self.input_size = input_size
-                self.hidden_size  = hidden_size
+                self.hidden_size  = [300,150,30]
                 self.fc = nn.Sequential(
                         nn.Linear(self.input_size, self.hidden_size[0]),
                         nn.ReLU(),
                         nn.Dropout(0.3),
                         nn.Linear(self.hidden_size[0], self.hidden_size[1]),
                         nn.ReLU(),
-                        nn.Linear(self.hidden_size[1], 1)
+                        nn.Dropout(0.3),
+                        nn.Linear(self.hidden_size[1], (self.hidden_size[2])),
+                        nn.ReLU(),
+                        nn.Linear(self.hidden_size[2], 1)
                 )
                 for layer in self.fc:
                         if isinstance(layer, nn.Linear):
@@ -48,7 +51,7 @@ class Feedforward(torch.nn.Module):
                 return output
         
 def createModel():
-    model = Feedforward(123, [150, 30])
+    model = Feedforward(123)
     model.to(DEVICE)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
@@ -59,7 +62,7 @@ def createModel():
 def loadData(dataset, cost):
     ##load data
     X = pd.read_csv(f'{ROOT_DIR}/data/{DATASET}/data_{dataset}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(124)])
-    X = X.sample(n=500)
+    X = X.sample(n=1000)
     ##get X and label
     y = X.iloc[:,-1]
     X = X.iloc[:,:-1]
@@ -75,7 +78,7 @@ def run_model_for_cost(inputs):
 def main():
      ##run model on datasets
     cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
-    costs = [0.10, 0.20, 0.28, 0.39, 0.46]
+    costs = [0.11, 0.19, 0.30, 0.40, 0.48]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     with Pool(cpu) as pool:
         results = pool.map(run_model_for_cost, inputs)

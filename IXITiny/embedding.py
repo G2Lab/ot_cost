@@ -11,10 +11,11 @@ import torchio as tio
 from pathlib import Path
 import copy
 from unet import UNet
+import torch.nn.init as init
 
-ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl'
-BATCH_SIZE = 8
-LR = 1e-3
+ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
+BATCH_SIZE = 64
+LR = 5e-2
 EPOCHS = 1000
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHANNELS_DIMENSION = 1
@@ -113,8 +114,14 @@ class Autoencoder(nn.Module):
             nn.ReLU(),
             nn.ConvTranspose3d(64, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            nn.ConvTranspose3d(128, 64, kernel_size=(3,2,3), stride=2, padding=1, output_padding=1) # Changed the kernel size in the Y dimension
+            nn.ConvTranspose3d(128, 64, kernel_size=(3,2,3), stride=2, padding=1, output_padding=1)
         )
+
+        for m in self.modules():
+            if isinstance(m, (nn.Conv3d, nn.Linear)):
+                    init.kaiming_normal_(m.weight, nonlinearity='relu')
+                    if m.bias is not None:
+                        init.zeros_(m.bias)
 
     def forward(self, x, embedding = False):
         x = self.encoder(x)
@@ -153,6 +160,8 @@ def train_autoencoder(n_emb):
         padding=True,
         activation='PReLU',
     )
+    checkpoint = torch.load(f'{ROOT_DIR}/data/IXITiny/whole_images_epoch_5.pth')
+    model.load_state_dict(checkpoint['weights'])
     model.to(DEVICE)
     ae = Autoencoder(n_emb)
     ae = ae.to(DEVICE)
@@ -245,6 +254,8 @@ def train_autoencoder(n_emb):
             best_model = copy.deepcopy(ae)
             best_val_loss = val_loss
             early_stopping_counter = 0
+        elif val_loss < min(val_losses[-5:]):
+            early_stopping_counter = 0
         else:
             early_stopping_counter += 1
             if early_stopping_counter >= patience:
@@ -259,7 +270,7 @@ def train_autoencoder(n_emb):
 def main():
     print(DEVICE)
 
-    n_embs = [1024, 2048, 4096, 8192]
+    n_embs = [256, 512, 1024, 2048, 4096]
     losses = {}
     for n_emb in n_embs:
         losses[n_emb] = train_autoencoder(n_emb)

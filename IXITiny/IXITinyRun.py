@@ -17,12 +17,13 @@ importlib.reload(pp)
 importlib.reload(pr)
 import pickle
 from unet import UNet
+from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 50
-BATCH_SIZE = 8
-RUNS = 50
+BATCH_SIZE = 1000
+RUNS = 2
 DATASET = 'IXITiny'
 METRIC_TEST = 'DICE'
 LEARNING_RATE = 5e-3
@@ -103,11 +104,16 @@ def run_model_for_cost(inputs):
 
 def main():
      ##run model on datasets
+    cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
     costs = [0.08, 0.28, 0.30]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
-    for input in inputs:
-        results.append(run_model_for_cost(input))
+    if DEVICE == 'cpu':
+        with Pool(cpu) as pool:
+            results = pool.map(run_model_for_cost, inputs)
+    else:
+        for input in inputs:
+            results.append(run_model_for_cost(input))
 
     losses = {}
     metrics_all = pd.DataFrame()

@@ -5,13 +5,12 @@ DATA_DIR = f'{ROOT_DIR}/data/ISIC'
 
 import sys
 import json
+import os
 import torch
 sys.path.append(f'{ROOT_DIR}/code/ISIC/')
 import torch.nn.functional as F
 import torch.nn as nn
 import dataset
-sys.path.append(f'{ROOT_DIR}/code/ISIC/efficientnet_ae')
-import model_ae as ae
 from torch.utils.data import DataLoader as dl
 from torch.optim.lr_scheduler import ExponentialLR
 import copy
@@ -20,7 +19,7 @@ from multiprocessing import Pool
 
 BATCH_SIZE = 512
 LR = 5e-2
-EPOCHS = 1000
+EPOCHS = 50
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -32,11 +31,10 @@ class Autoencoder(nn.Module):
         self.encoder = nn.Sequential(
             nn.Conv2d(3, 16, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(16),
             nn.Conv2d(16, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),
-            nn.MaxPool2d(2, 2),  
-            nn.Conv2d(32, 64, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(64),
-            nn.Conv2d(64, 128, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(128),
             nn.MaxPool2d(2, 2), 
-            nn.Conv2d(128, 64, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(64),
+            nn.Conv2d(32, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),  
+            nn.Conv2d(32, 64, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(64),
+            nn.MaxPool2d(2, 2), 
             nn.Conv2d(64, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),
             nn.Conv2d(32, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),
 )
@@ -84,10 +82,10 @@ def train_autoencoder(n_emb):
     
     # Load data
     train_data = dataset.FedIsic2019(train=True, pooled = True, data_path=DATA_DIR)
-    train_loader = dl(train_data, batch_size = BATCH_SIZE, shuffle = True)
+    
 
     val_data = dataset.FedIsic2019(train=False, pooled = True, data_path=DATA_DIR)
-    val_loader = dl(val_data, batch_size = BATCH_SIZE, shuffle = True)
+    
 
     # Early stopping parameters
     patience = 10
@@ -98,13 +96,22 @@ def train_autoencoder(n_emb):
     train_losses = []
     val_losses = []
 
+    subset_batches_train = 200
+    subset_batches_val = 100
+
     # Training loop
     for epoch in range(EPOCHS):
+        #inside loop as i subset the training per epoch
+        train_loader = dl(train_data, batch_size = BATCH_SIZE, shuffle = True)
+        val_loader = dl(val_data, batch_size = BATCH_SIZE, shuffle = True)
+        
         model.train()
         
         # Training step
         train_loss = 0.0
-        for image, label in train_loader:
+        for i, (image, label) in enumerate(train_loader):
+            if i>= subset_batches_train:
+                break
             image = image.transpose(2,1)
             image = image.to(DEVICE) 
             optimizer.zero_grad()
@@ -115,14 +122,16 @@ def train_autoencoder(n_emb):
             train_loss += loss.item()
         
         lr_scheduler.step()   
-        train_losses.append(train_loss / len(train_loader))
+        train_losses.append(train_loss / subset_batches_train)
         
         # Validation step
         model.eval()
         if epoch % 10 == 0:
             val_loss = 0.0
             with torch.no_grad():
-                for image, label in val_loader:
+                for i, (image, label) in enumerate(val_loader):
+                    if i >= subset_batches_val:
+                        break
                     image = image.transpose(2,1)
                     image = image.to(DEVICE)
                     reconstructed = model(image)
@@ -130,7 +139,7 @@ def train_autoencoder(n_emb):
                     
                     val_loss += loss.item()
                     
-            val_loss /= len(val_loader)
+            val_loss /= subset_batches_val
             val_losses.append(val_loss)
             
             print(f'Epoch {epoch}, Train Loss: {train_loss / len(train_loader)}, Validation Loss: {val_loss}')
@@ -140,6 +149,8 @@ def train_autoencoder(n_emb):
                 best_model = copy.deepcopy(model)
                 best_val_loss = val_loss
                 early_stopping_counter = 0
+                best_model.to('cpu')
+                torch.save(best_model.state_dict(), f'{ROOT_DIR}/data/ISIC/model_checkpoint_{n_emb}.pth')
             else:
                 early_stopping_counter += 1
                 if early_stopping_counter >= patience:
@@ -147,7 +158,7 @@ def train_autoencoder(n_emb):
                     break
     
     best_model.to('cpu')
-    torch.save(best_model.state_dict(), f'{ROOT_DIR}/data/ISIC/model_checkpoint.pth')
+    torch.save(best_model.state_dict(), f'{ROOT_DIR}/data/ISIC/model_checkpoint_{n_emb}.pth')
     return train_losses, val_losses
 
 
@@ -156,10 +167,15 @@ def main(n_emb):
 
 if __name__ == '__main__':
     n_embs = [512, 1024, 2048, 4096]
-
-    with Pool() as pool:
-        results = pool.map(main, n_embs)
-    
+    cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
+    if DEVICE == 'cpu':
+        with Pool(cpu) as pool:
+            results = pool.map(main, n_embs)
+    else:
+        results = []
+        for n_emb in n_embs:
+            results.append(main(n_emb))
+        
     losses = {}
     for n_emb, loss in results:
         losses[n_emb] = loss

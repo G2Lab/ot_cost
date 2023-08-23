@@ -9,7 +9,7 @@ import warnings
 warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overridden after learning rate scheduler initialization.")
 
 
-DATASET_TYPES_NUMERIC = {'Synthetic', 'Credit', 'Weather', 'IXITiny'}
+DATASET_TYPES_NUMERIC = {'Synthetic', 'Credit', 'Weather'}
 DATASET_TYPES_CATEGORICAL = {'CIFAR', 'EMNIST'}
 FED_EPOCH = 2
 
@@ -31,7 +31,7 @@ class MetricsFactory:
 
 
 class ModelTrainer:
-    def __init__(self, dataset, model, optimizer, criterion, lr_scheduler, device, patience=5):
+    def __init__(self, dataset, model, optimizer, criterion, lr_scheduler, device, patience=10):
         self.dataset = dataset
         self.loss_function = self._setup_loss_function()
         self.device = device
@@ -76,7 +76,7 @@ class ModelTrainer:
             self.best_model = copy.deepcopy(self.model)
             self.early_stopping_counter = 0
 
-        elif len(self.val_losses) >= 10 and val_loss > min(self.val_losses[-3:]):
+        elif len(self.val_losses) >= 10 and val_loss > np.mean(self.val_losses[-5:]):
                 self.early_stopping_counter += 1
                 if self.early_stopping_counter >= self.patience:
                     print("Early stopping")
@@ -131,7 +131,9 @@ class ModelTrainer:
         return self.loss_function(outputs, y)
 
     def _setup_loss_function(self):
-        if self.dataset in DATASET_TYPES_NUMERIC:
+        if self.dataset in 'IXITiny':
+            return lambda outputs, y: self.criterion(outputs, y.float())
+        elif self.dataset in DATASET_TYPES_NUMERIC:
             return lambda outputs, y: self.criterion(outputs.squeeze(), y.float().squeeze())
         elif self.dataset in DATASET_TYPES_CATEGORICAL:
             return lambda outputs, y: self.criterion(outputs.squeeze(), y.long().squeeze())
@@ -162,7 +164,7 @@ class TransferModelTrainer(ModelTrainer):
             self.best_loss = combined_val_loss
             self.best_model = copy.deepcopy(self.model)
             self.early_stopping_counter = 0
-        elif len(self.val_losses) >= 10 and combined_val_loss > min(self.val_losses[-3:] + self.val_loss_source[-3:]):
+        elif len(self.val_losses) >= 10 and combined_val_loss > np.mean(self.val_losses[-5:] + self.val_loss_source[-5:]):
             self.early_stopping_counter += 1
             if self.early_stopping_counter >= self.patience:
                 print("Early stopping")
@@ -249,7 +251,7 @@ class FederatedModelTrainer(ModelTrainer):
             self.best_loss = val_loss
             self.best_model = copy.deepcopy(self.model)
             self.early_stopping_counter = 0
-        elif len(self.val_losses) >= 10 and val_loss > min(self.val_losses[-3:]):
+        elif len(self.val_losses) >= 10 and val_loss > np.mean(self.val_losses[-5:]):
             self.early_stopping_counter += 1
             if self.early_stopping_counter >= self.patience:
                 print("Early stopping")
@@ -289,7 +291,9 @@ class FederatedModelTrainer(ModelTrainer):
         return loss
 
     def _setup_loss_function_fed(self, criterion):
-        if self.dataset in DATASET_TYPES_NUMERIC:
+        if self.dataset in 'IXITiny':
+            return lambda outputs, y: self.criterion(outputs, y.float())
+        elif self.dataset in DATASET_TYPES_NUMERIC:
             return lambda outputs, y: criterion(outputs.squeeze(), y.float().squeeze())
         elif self.dataset in DATASET_TYPES_CATEGORICAL:
             return lambda outputs, y: criterion(outputs.squeeze(), y.long().squeeze())
@@ -327,6 +331,81 @@ class FederatedModelTrainer(ModelTrainer):
 
     def _get_site_objects(self, site_number):
         return (self.model_1, self.criterion_1, self.optimizer_1, self.lr_scheduler_1) if site_number == 1 else (self.model_2, self.criterion_2, self.optimizer_2, self.lr_scheduler_2)
+
+class MAMLModelTrainer(FederatedModelTrainer):
+    def __init__(self, dataset, model, optimizer, criterion, lr_scheduler, device, dataloader_1, dataloader_2):
+        super().__init__(dataset, model, optimizer, criterion, lr_scheduler, device, dataloader_1, dataloader_2)
+        self.pfedme = False
+        self.save = False
+        self.alpha = 5e-2
+        self.beta = 1e-3
+
+    def _train_site(self, data_loader, site_number):
+        model_site, criterion_site, optimizer_site, lr_scheduler_site = self._get_site_objects(site_number)
+        train_loss = 0
+
+        for batch in data_loader:
+            x, y= batch
+            x1, y1, x2, y2= self._split_dataset(batch)
+
+            #Compute gradients and Hessian
+            grad_loss = self._compute_gradient(model_site, criterion_site, x1, y1)
+            #Update model with gradient
+            with torch.no_grad():
+                for p, g in zip(model_site.parameters(), grad_loss):
+                    p -= self.alpha * g
+            hessian_loss = self._compute_approx_hessian(model_site, criterion_site, x2, y2)
+            with torch.no_grad():
+                for p, h in zip(model_site.parameters(), hessian_loss):
+                    p -=  self.alpha * h 
+
+            outputs = model_site(x)
+            train_loss += self._compute_loss(outputs, y)
+
+        train_loss /= len(data_loader)
+        if (site_number == 1) and (self.save):
+            self.train_losses.append(train_loss)
+
+    def _compute_gradient(self, model, criterion, x, y):
+        optimizer = torch.optim.SGD(model.parameters(), lr=1) # There is no step
+        optimizer.zero_grad()
+        outputs = model(x)
+        loss = self._compute_loss(outputs, y)
+        gradients = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+        return gradients
+    
+    def _compute_approx_hessian(self, model, criterion, x, y, delta = 1e-3):
+        u = self._compute_gradient(model, criterion, x, y)
+        model_plus = self._perturb_model(model, delta, u, pos = True)
+        model_neg = self._perturb_model(model, delta, u, pos = False)
+        grad_plus = self._compute_gradient(model_plus, criterion, x, y)  
+        grad_minus = self._compute_gradient(model_neg, criterion, x, y)
+
+        hessian_approximation = [(gp - gm) / (2 * delta) for gp, gm in zip(grad_plus, grad_minus)]
+        return hessian_approximation
+
+    def _perturb_model(self, model, delta, u, pos = True):
+        model_copy = copy.deepcopy(model)
+        for p, update in zip(model_copy.parameters(), u):
+            if pos:
+                p.data = p.data + delta * update
+            else:
+                p.data = p.data - delta * update
+        return model_copy
+
+
+    def _split_dataset(self, batch):
+        x, y = batch
+        size = x.size(0) // 2
+
+        x1, x2 = x[:size], x[size:]
+        y1, y2  = y[:size], y[size:]
+
+        x1, y1 = to_device(x1, self.device), to_device(y1, self.device)
+        x2, y2 = to_device(x2, self.device), to_device(y2, self.device)
+
+
+        return x1, y1, x2, y2
 
 
 def get_dice_score(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):

@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overri
 
 global DEVICE
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme']
+ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'maml']
 
 class ModelPipeline:
     def __init__(self, c, loadDataFunc, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS):
@@ -70,9 +70,10 @@ class ModelPipeline:
         self.transfer(X1, y1, X2, y2)
         self.federated(X1, y1, X2, y2)
         self.federated(X1, y1, X2, y2, pfedme = True)
+        self.maml(X1, y1, X2, y2)
 
         metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics]
-        metrics_df = pd.DataFrame(metrics, index=['single', 'joint','transfer','federated', 'pfedme']).T
+        metrics_df = pd.DataFrame(metrics, index=['single', 'joint','transfer','federated', 'pfedme', 'maml']).T
         metrics_df['cost'] = self.c
         return metrics_df
         
@@ -88,7 +89,7 @@ class ModelPipeline:
     
 
     def single(self, X1, y1):
-        self.SINGLE = False
+        self.SINGLE = True
         model, criterion, optimizer, lr_scheduler = self.createModelFunc
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader, val_loader, test_loader = dataloader.preprocess(X1, y1)
@@ -104,7 +105,7 @@ class ModelPipeline:
         return 
 
     def joint(self, X1, y1, X2, y2):
-        self.SINGLE = True
+        self.SINGLE = False
         model, criterion, optimizer, lr_scheduler = self.createModelFunc
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader, val_loader, test_loader = dataloader.preprocess_joint(X1, y1, X2, y2)
@@ -119,7 +120,7 @@ class ModelPipeline:
         return
 
     def transfer(self, X1, y1, X2, y2):
-        self.SINGLE = True
+        self.SINGLE = False
         model, criterion, optimizer, lr_scheduler = self.createModelFunc
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader_target, val_loader_target, test_loader_target = dataloader.preprocess(X1, y1)
@@ -135,7 +136,7 @@ class ModelPipeline:
         return 
 
     def federated(self, X1, y1, X2, y2, pfedme=False, pfedme_reg=1e-1):
-        self.SINGLE = True
+        self.SINGLE = False
         model, criterion, optimizer, lr_scheduler = self.createModelFunc
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
@@ -154,6 +155,22 @@ class ModelPipeline:
             self.pfedme_test_metrics = fed_test_metrics 
             self.saveLosses('pfedme', federated_run_pipeline)
         return 
+    
+    def maml(self, X1, y1, X2, y2):
+        self.SINGLE = False
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
+        train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
+        train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
+        maml_run_pipeline = tr.MAMLModelTrainer(self.DATASET, model, optimizer, criterion,lr_scheduler, self.DEVICE, train_loader_1, train_loader_2)
+        epoch = 0
+        while (not maml_run_pipeline.stopping) & (epoch < self.EPOCHS // tr.FED_EPOCH):
+            maml_run_pipeline.fit(train_loader_1, train_loader_2, val_loader_1, val_loader_2)
+            epoch +=1
+        maml_test_metrics = maml_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
+        self.maml_test_metrics = maml_test_metrics
+        self.saveLosses('maml', maml_run_pipeline)
+        return
 
 
     def run_model_for_cost(self):

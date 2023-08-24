@@ -5,6 +5,7 @@ import copy
 from sklearn import metrics
 import numpy as np
 import warnings
+from collections import OrderedDict
 # Suppress the specific LR warning that is non-issue
 warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overridden after learning rate scheduler initialization.")
 
@@ -84,8 +85,6 @@ class ModelTrainer:
         else:
             self.early_stopping_counter = 0
             
-        self.lr_scheduler.step()
-
 
     def test(self, dataloader, metric_name):
         metric_function = MetricsFactory.get_metric(metric_name)
@@ -120,6 +119,7 @@ class ModelTrainer:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step() 
+        self.lr_scheduler.step()
         return loss
 
     def _validate_step(self, x, y):
@@ -259,9 +259,6 @@ class FederatedModelTrainer(ModelTrainer):
         else:
             self.early_stopping_counter = 0
 
-        self.lr_scheduler.step()
-        self.lr_scheduler_1.step()
-        self.lr_scheduler_2.step()
 
     def _train_site(self, data_loader, site_number):
         model_site, criterion_site, optimizer_site, lr_scheduler_site   = self._get_site_objects(site_number)
@@ -337,75 +334,96 @@ class MAMLModelTrainer(FederatedModelTrainer):
         super().__init__(dataset, model, optimizer, criterion, lr_scheduler, device, dataloader_1, dataloader_2)
         self.pfedme = False
         self.save = False
-        self.alpha = 5e-2
+        self.alpha = 1e-2
         self.beta = 1e-3
+        self.count = 0
 
     def _train_site(self, data_loader, site_number):
         model_site, criterion_site, optimizer_site, lr_scheduler_site = self._get_site_objects(site_number)
         train_loss = 0
 
         for batch in data_loader:
-            x, y= batch
-            x1, y1, x2, y2= self._split_dataset(batch)
+            x, y = batch
+            x1, y1, x2, y2, x3, y3= self._split_dataset(batch)
+            #First batch gradient and updates
+            temp_model = copy.deepcopy(model_site)
+            gradient = self._compute_gradient(temp_model, x1, y1)
+            optimizer_site.zero_grad()
+            for param, grad in zip(temp_model.parameters(), gradient):
+                param.data.sub_(self.alpha * grad)
 
-            #Compute gradients and Hessian
-            grad_loss = self._compute_gradient(model_site, criterion_site, x1, y1)
-            #Update model with gradient
-            with torch.no_grad():
-                for p, g in zip(model_site.parameters(), grad_loss):
-                    p -= self.alpha * g
-            hessian_loss = self._compute_approx_hessian(model_site, criterion_site, x2, y2)
-            with torch.no_grad():
-                for p, h in zip(model_site.parameters(), hessian_loss):
-                    p -=  self.alpha * h 
+            #Hessian
+            gradients_1st = self._compute_gradient(temp_model, x2, y2)
+            gradients_2nd = self._compute_approx_hessian(temp_model, x3, y3, gradients_1st)
+            #Update model
+            for param, grad1, grad2 in zip(model_site.parameters(), gradients_1st, gradients_2nd):
+                    param.data.sub_(self.beta * grad1 - self.beta * self.alpha * grad2)
 
             outputs = model_site(x)
             train_loss += self._compute_loss(outputs, y)
+        #Update LR (can't use standard methods)
+        self.count += 1
+        if self.count % 500 == 0:
+            self.alpha = self.alpha / 2
+            self.beta = self.beta / 2
 
         train_loss /= len(data_loader)
         if (site_number == 1) and (self.save):
             self.train_losses.append(train_loss)
 
-    def _compute_gradient(self, model, criterion, x, y):
-        optimizer = torch.optim.SGD(model.parameters(), lr=1) # There is no step
-        optimizer.zero_grad()
+    def _compute_gradient(self, model, x, y):
+        model.zero_grad()
         outputs = model(x)
         loss = self._compute_loss(outputs, y)
-        gradients = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+        gradients = torch.autograd.grad(loss, model.parameters())
         return gradients
     
-    def _compute_approx_hessian(self, model, criterion, x, y, delta = 1e-3):
-        u = self._compute_gradient(model, criterion, x, y)
-        model_plus = self._perturb_model(model, delta, u, pos = True)
-        model_neg = self._perturb_model(model, delta, u, pos = False)
-        grad_plus = self._compute_gradient(model_plus, criterion, x, y)  
-        grad_minus = self._compute_gradient(model_neg, criterion, x, y)
+    def _compute_approx_hessian(self, model, x,y,v):
+        ##freeze model and get 2 COPIES
+        frz_model_params = copy.deepcopy(model.state_dict())
+        delta = 1e-3
+        dummy_model_params_1 = OrderedDict()
+        dummy_model_params_2 = OrderedDict()
+        ## perturb model slightly
+        with torch.no_grad():
+            for (layer_name, param), grad in zip(model.named_parameters(), v):
+                dummy_model_params_1.update({layer_name: param + delta * grad})
+                dummy_model_params_2.update({layer_name: param - delta * grad})
+        ## get the new gradients
+        model.load_state_dict(dummy_model_params_1, strict=False)
+        outputs = model(x)
+        loss_1 = self._compute_loss(outputs, y)
+        grads_1 = torch.autograd.grad(loss_1, model.parameters())
 
-        hessian_approximation = [(gp - gm) / (2 * delta) for gp, gm in zip(grad_plus, grad_minus)]
-        return hessian_approximation
+        model.load_state_dict(dummy_model_params_2, strict=False)
+        outputs = model(x)
+        loss_2 = self._compute_loss(outputs, y)
+        grads_2 = torch.autograd.grad(loss_2, model.parameters())
 
-    def _perturb_model(self, model, delta, u, pos = True):
-        model_copy = copy.deepcopy(model)
-        for p, update in zip(model_copy.parameters(), u):
-            if pos:
-                p.data = p.data + delta * update
-            else:
-                p.data = p.data - delta * update
-        return model_copy
+        ## restore model
+        model.load_state_dict(frz_model_params)
 
+        #calculate approximated hessian
+        gradients = []
+        with torch.no_grad():
+            for g1, g2 in zip(grads_1, grads_2):
+                gradients.append((g1 - g2) / (2 * delta))
+        return gradients
+    
 
     def _split_dataset(self, batch):
         x, y = batch
-        size = x.size(0) // 2
+        size = x.size(0) // 3
 
-        x1, x2 = x[:size], x[size:]
-        y1, y2  = y[:size], y[size:]
+        x1, x2, x3 = x[:size], x[size:size*2], x[size*2:]
+        y1, y2, y3  = y[:size], y[size:size*2], y[size*2:]
 
         x1, y1 = to_device(x1, self.device), to_device(y1, self.device)
         x2, y2 = to_device(x2, self.device), to_device(y2, self.device)
+        x3, y3 = to_device(x3, self.device), to_device(y3, self.device)
 
 
-        return x1, y1, x2, y2
+        return x1, y1, x2, y2, x3, y3
 
 
 def get_dice_score(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):

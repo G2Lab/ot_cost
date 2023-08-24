@@ -73,7 +73,7 @@ class ModelPipeline:
         self.maml(X1, y1, X2, y2)
 
         metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics]
-        metrics_df = pd.DataFrame(metrics, index=['single', 'joint','transfer','federated', 'pfedme', 'maml']).T
+        metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T
         metrics_df['cost'] = self.c
         return metrics_df
         

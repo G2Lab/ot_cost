@@ -17,7 +17,7 @@ import copy
 from multiprocessing import Pool
 
 
-BATCH_SIZE = 512
+BATCH_SIZE = 128
 LR = 5e-2
 EPOCHS = 50
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -94,8 +94,8 @@ def train_autoencoder(n_emb):
     train_losses = []
     val_losses = []
 
-    subset_batches_train = 200
-    subset_batches_val = 100
+    subset_batches_train = 25
+    subset_batches_val = 8
 
     # Training loop
     for epoch in range(EPOCHS):

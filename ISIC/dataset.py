@@ -87,6 +87,7 @@ class Isic2019Raw(torch.utils.data.Dataset):
         return (
             image,
             torch.tensor(target, dtype=self.y_dtype),
+            image_path
         )
 
 

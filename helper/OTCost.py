@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import numpy as np
+np.warnings.filterwarnings('ignore', category=RuntimeWarning)
 from itertools import product
 import ot
 from sklearn.preprocessing import normalize
@@ -30,9 +31,12 @@ class OTCost:
         if not self.private:
             part_X1 = self.data['1'][index_1]
             part_X2 = self.data['2'][index_2]
+            vector_dim = part_X1.shape[1]
+            if vector_dim > 5000:
+                part_X1, part_X2 = compress_vector((-1,1), part_X1, part_X2)
             part_X1, part_X2 = self.normalize_data(part_X1, part_X2)
             feature_cost = (1 - np.dot(part_X1, part_X2.T))
-            self.feature_costs.append((i, np.percentile(feature_cost, 10), np.percentile(feature_cost, 25), np.percentile(feature_cost, 50)))
+            self.feature_costs.append((i, np.percentile(feature_cost, 10), np.percentile(feature_cost, 25), np.percentile(feature_cost, 50), np.percentile(feature_cost, 75), np.percentile(feature_cost, 90)))
         else:
             feature_cost = privateDotproduct(self.data, index_1, index_2)
         return feature_cost
@@ -47,12 +51,14 @@ class OTCost:
         mu_2, sigma_2 = get_normal_params(compressed_X2)
 
         label_cost = hellinger_distance(mu_1, sigma_1, mu_2, sigma_2)
-        if label_cost == None:
+        while label_cost == None:
             #repeat with smaller number of PC's
             n_components = compressed_X1.shape[1]
-            halfway = n_components // 2
-            mu_1, sigma_1 = get_normal_params(compressed_X1[:,:halfway])
-            mu_2, sigma_2 = get_normal_params(compressed_X2[:,:halfway])
+            partway = n_components  - n_components // 8
+            compressed_X1 = compressed_X1[:,:partway]
+            compressed_X2 = compressed_X2[:,:partway]
+            mu_1, sigma_1 = get_normal_params(compressed_X1)
+            mu_2, sigma_2 = get_normal_params(compressed_X2)
             label_cost = hellinger_distance(mu_1, sigma_1, mu_2, sigma_2)
         self.label_costs.append((i, label_cost))
         return label_cost
@@ -78,10 +84,10 @@ class OTCost:
         self.costs_all = costs_all
         return
             
-    def calculate_ot_cost(self, stability_param = 1e1):
+    def calculate_ot_cost(self):
         self.total_cost()
         #Stability param ensures the algorithm works with the epsilon in the algorithm
-        costs_stable = self.costs_all / stability_param
+        costs_stable = self.costs_all
         a, b = np.ones((costs_stable.shape[0])) / costs_stable.shape[0], np.ones((costs_stable.shape[1])) / costs_stable.shape[1]
         self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.lam, stopThr=1e-6, numItermax=12000, warn = True, verbose=False)
         ot_cost = (self.Gs * self.costs_all).sum()
@@ -115,11 +121,10 @@ def hellinger_distance(mu_1, sigma_1, mu_2, sigma_2):
     diff_mu = mu_1 - mu_2
     inv_avg_sigma = np.linalg.inv(avg_sigma)
     term2 = np.exp(-0.125 * np.dot(diff_mu.T, np.dot(inv_avg_sigma, diff_mu)))
-    try:
-        cost = 1 - np.sqrt(term1 * term2)
-    except:
+    cost = 1 - np.sqrt(term1 * term2)
+    if np.isnan(cost):
         cost = None
-        print('Halving size of dimensions for covariance calculation')
+        print('Degenerate vector, reducing dimension')
 
     return cost
 

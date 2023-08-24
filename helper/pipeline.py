@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overri
 
 global DEVICE
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'maml']
+ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme']
 
 class ModelPipeline:
     def __init__(self, c, loadDataFunc, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS):

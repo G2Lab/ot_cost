@@ -172,7 +172,6 @@ class TransferModelTrainer(ModelTrainer):
         else:
             self.early_stopping_counter = 0
 
-        self.lr_scheduler.step()
 
     def train(self, dataloader_target, dataloader_source):
         return self._process_dataloader(dataloader_target, dataloader_source, validate=False)
@@ -206,6 +205,7 @@ class TransferModelTrainer(ModelTrainer):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            self.lr_scheduler.step()
         return loss
 
 
@@ -273,7 +273,7 @@ class FederatedModelTrainer(ModelTrainer):
             optimizer_site.zero_grad()
             loss.backward()
             optimizer_site.step()
-        lr_scheduler_site.step() 
+            lr_scheduler_site.step() 
         train_loss /= len(data_loader)
         if (site_number == 1) and (self.save):
             self.train_losses.append(train_loss)

@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
 EPOCHS = 50
-BATCH_SIZE = 1000
+BATCH_SIZE = 64
 RUNS = 2
 DATASET = 'IXITiny'
 METRIC_TEST = 'DICE'

@@ -27,34 +27,31 @@ class Autoencoder(nn.Module):
     def __init__(self, n_emb):
         super(Autoencoder, self).__init__()
         self.n_emb = n_emb
+        self.bottleneck_dim = (16,25,25)
 
         self.encoder = nn.Sequential(
             nn.Conv2d(3, 16, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(16),
             nn.Conv2d(16, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),
             nn.MaxPool2d(2, 2), 
-            nn.Conv2d(32, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),  
             nn.Conv2d(32, 64, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(64),
+            nn.Conv2d(64, 128, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(128),
             nn.MaxPool2d(2, 2), 
+            nn.Conv2d(128, 64, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(64),
             nn.Conv2d(64, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),
+            nn.MaxPool2d(2, 2), 
+            nn.Conv2d(32, 16, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(16),
 )
         
         self.bottleneck = nn.Sequential(
-            nn.Linear(32 * 50 * 50, 32*25*25),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(32*25*25, self.n_emb)
+            nn.Linear(self.bottleneck_dim[0] * self.bottleneck_dim[1] * self.bottleneck_dim[2], self.n_emb)
 )
-
-        self.expand = nn.Sequential(nn.Linear(self.n_emb, 32*50*50))
+        self.expand = nn.Sequential(nn.Linear(self.n_emb, self.bottleneck_dim[0] * self.bottleneck_dim[1] * self.bottleneck_dim[2]))
 
         self.decoder = nn.Sequential(
-            nn.Conv2d(32, 32, 3, padding=1),        
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 16, 4, stride=2, padding=1), 
-            nn.ReLU(),
-            nn.ConvTranspose2d(16, 16, 4, stride=2, padding=1), 
-            nn.ReLU(),
+            nn.Conv2d(16, 32, 3, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),      
+            nn.ConvTranspose2d(32, 32, 4, stride=2, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(32),   
+            nn.ConvTranspose2d(32, 16, 4, stride=2, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(16),   
+            nn.ConvTranspose2d(16, 16, 4, stride=2, padding=1), nn.LeakyReLU(0.1), nn.BatchNorm2d(16), 
             nn.Conv2d(16, 3, 3, padding=1),    
             nn.Sigmoid()
 )
@@ -67,9 +64,10 @@ class Autoencoder(nn.Module):
         if get_embedding:
             return embedding
         x = self.expand(embedding)
-        x = x.view(x.size(0), 32, 50, 50)
+        x = x.view(x.size(0), self.bottleneck_dim[0], self.bottleneck_dim[1], self.bottleneck_dim[2])
         x = self.decoder(x)
         return x
+
 
 
 def train_autoencoder(n_emb):

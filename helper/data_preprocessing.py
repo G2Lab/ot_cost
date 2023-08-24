@@ -1,5 +1,5 @@
 from sklearn.preprocessing import StandardScaler
-from torch.utils.data  import DataLoader, random_split, TensorDataset
+from torch.utils.data  import DataLoader, random_split, TensorDataset, Dataset
 from sklearn.model_selection import train_test_split
 import torch
 import numpy as np
@@ -7,7 +7,6 @@ from torchvision import transforms
 import nibabel as nib
 import torchio as tio
 from abc import ABC, abstractmethod
-from torch.utils.data import ConcatDataset
 
 
 DATASET_TYPES_TABULAR = {'Synthetic', 'Credit', 'Weather'}
@@ -52,8 +51,8 @@ class TabularDatasetHandler(AbstractDatasetHandler):
         return TensorDataset(X_tensor, y_tensor)
     
 class ImageDatasetHandler(AbstractDatasetHandler):
-    def preprocess_data(self, dataloader, fit_transform = False):
-        X, y = dataloader
+    def preprocess_data(self, dl, fit_transform = False):
+        X, y = dl
         if self.dataset_name in ['EMNIST', 'CIFAR']:
             X_tensor = torch.tensor(X, dtype=torch.float32)
             y_tensor = torch.tensor(y, dtype=torch.long)
@@ -65,18 +64,39 @@ class ImageDatasetHandler(AbstractDatasetHandler):
                                                     transforms.Resize((224, 224)),
                                                     transforms.ToTensor()])
                     X_tensor = torch.stack([transform(image) for image in X_tensor])
+            return TensorDataset(X_tensor, y_tensor)
         elif self.dataset_name in ['IXITiny']:
-            transform = tio.Compose([
-                                tio.ToCanonical(),
-                                tio.Resample(4),
-                                tio.CropOrPad((48, 60, 48)),
-                                tio.OneHot()
-                                ])
-            image_files = [torch.load(path) for path in X]
-            label_files = [torch.tensor(nib.load(path).get_fdata(), dtype=torch.float).unsqueeze(0) for path in y]
-            X_tensor = torch.stack(image_files)
-            y_tensor = torch.stack([transform(label) for label in label_files])
-        return TensorDataset(X_tensor, y_tensor)
+            return IXITinyDataset(dl)
+            
+        
+
+class IXITinyDataset(Dataset):
+    def __init__(self, data, transform=None):
+        image_paths, label_paths = data
+        self.image_paths = image_paths
+        self.label_paths = label_paths
+        self.transform = transform if transform else tio.Compose([
+                            tio.ToCanonical(),
+                            tio.Resample(4),
+                            tio.CropOrPad((48, 60, 48)),
+                            tio.OneHot()
+                        ])
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image_path = self.image_paths[idx]
+        label_path = self.label_paths[idx]
+
+        image = torch.load(image_path)
+        label = torch.tensor(nib.load(label_path).get_fdata(), dtype=torch.float).unsqueeze(0)
+
+        if self.transform:
+            label = self.transform(label)
+
+        return image, label
+    
 
 class DataPreprocessor:
     def __init__(self, dataset, batch_size):

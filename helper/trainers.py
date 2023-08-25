@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overri
 
 
 DATASET_TYPES_NUMERIC = {'Synthetic', 'Credit', 'Weather'}
-DATASET_TYPES_CATEGORICAL = {'CIFAR', 'EMNIST'}
+DATASET_TYPES_CATEGORICAL = {'CIFAR', 'EMNIST', 'ISIC'}
 FED_EPOCH = 2
 
 def to_device(data, device):
@@ -26,7 +26,8 @@ class MetricsFactory:
             'AUPRC': metrics.average_precision_score,
             'R2': metrics.r2_score,
             'Accuracy': metrics.accuracy_score,
-            'DICE': get_dice_score
+            'DICE': get_dice_score,
+            'Balanced_accuracy': metrics.balanced_accuracy_score 
         }
         return metric_mapping[metric_name]
 

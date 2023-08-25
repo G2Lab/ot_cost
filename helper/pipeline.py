@@ -70,7 +70,7 @@ class ModelPipeline:
         self.transfer(X1, y1, X2, y2)
         self.federated(X1, y1, X2, y2)
         self.federated(X1, y1, X2, y2, pfedme = True)
-        self.maml(X1, y1, X2, y2)
+        #self.maml(X1, y1, X2, y2)
 
         metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics]
         metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T

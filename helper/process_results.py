@@ -7,7 +7,7 @@ from scipy.stats import bootstrap
 global ROOT_DIR
 ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 SAVE_DIR = f'{ROOT_DIR}/results'
-ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'maml']
+ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme']
 
 def load_results(DATASET, name):
     return pd.read_csv(f'{ROOT_DIR}/results/{DATASET}/{name}')
@@ -83,8 +83,8 @@ def process_result(DATASET, metric, costs, save):
     estimates_diff = get_difference_estimates(results, costs)
     grapher(estimates_diff, DATASET, metric, cost_range, save)
     if save:
-        estimates.to_csv(f'{SAVE_DIR}/{DATASET}/{metric}_{costs}_estimates.csv')
-        estimates_diff.to_csv(f'{SAVE_DIR}/{DATASET}/{metric}_{costs}_estimates_change.csv')
+        estimates.to_csv(f'{SAVE_DIR}/{DATASET}/{metric}_{cost_range}_estimates.csv')
+        estimates_diff.to_csv(f'{SAVE_DIR}/{DATASET}/{metric}_{cost_range}_estimates_change.csv')
     return
 
 def process_results(DATASET, metric, costs, save = False):

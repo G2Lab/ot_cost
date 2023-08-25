@@ -139,7 +139,7 @@ class FedIsic2019(Isic2019Raw):
                 transforms.RandomHorizontalFlip(p=0.5),  
                 transforms.RandomAffine(degrees=0, shear=0.1),  
                 transforms.RandomCrop(sz),  
-                transforms.RandomErasing(p=0.5, scale=(1/16, 1/8), ratio=(1, 1)), 
+                #transforms.RandomErasing(p=0.5, scale=(1/16, 1/8), ratio=(1, 1)), 
                 #transforms.Normalize(mean, std), 
             ])
         else:

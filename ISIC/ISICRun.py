@@ -1,5 +1,6 @@
 global ROOT_DIR
 ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
+DATA_DIR = f'{ROOT_DIR}/data/ISIC'
 
 import pandas as pd
 import torch
@@ -8,15 +9,16 @@ import sys
 import os
 import numpy as np
 sys.path.append(f'{ROOT_DIR}/code/helper')
+sys.path.append(f'{ROOT_DIR}/code/ISIC/')
 import trainers as tr
 import pipeline as pp
 import process_results as pr
+import dataset
 import importlib
 importlib.reload(tr)
 importlib.reload(pp)
 importlib.reload(pr)
 import pickle
-from unet import UNet
 from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
@@ -24,75 +26,51 @@ from torch.optim.lr_scheduler import ExponentialLR
 EPOCHS = 500
 BATCH_SIZE = 64
 RUNS = 2
-DATASET = 'IXITiny'
-METRIC_TEST = 'DICE'
+DATASET = 'ISIC'
+METRIC_TEST = 'Accuracy'
 LEARNING_RATE = 1e-2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHANNELS_DIMENSION = 1
-SPATIAL_DIMENSIONS = 2, 3, 4
 
 
-class UNetClassifier(nn.Module):
+class efficientnetClassifier(nn.Module):
     def __init__(self):
-        super(UNetClassifier, self).__init__()
-        self.CHANNELS_DIMENSION = 1
-        self.SPATIAL_DIMENSIONS = 2, 3, 4
-
-        unet = UNet(
-            in_channels=1,
-            out_classes=2,
-            dimensions=3,
-            num_encoding_blocks=3,
-            out_channels_first_layer=8,
-            normalization='batch',
-            upsampling_type='linear',
-            padding=True,
-            activation='PReLU',
-        )
-
-        # Make all other parameters untrainable
-        for name, param in unet.named_parameters():
-            if 'classifier' not in name:
+        super(efficientnetClassifier, self).__init__()
+        self.efficientnet = torch.hub.load('NVIDIA/DeepLearningExamples:torchhub', 'nvidia_efficientnet_b0', pretrained=True)
+        for name, param in self.efficientnet.named_parameters():
+            if 'features' in name or 'classifier' in name:
+                param.requires_grad = True
+            else:
                 param.requires_grad = False
-
-        self.classifier = unet.classifier
-        self.initialize_weights()
-        del unet
+        self.efficientnet.classifier.fc = nn.Linear(1280, 7)
 
     def forward(self, x):
-        #unet has been removed as we save the representation up until then
-        logits = self.classifier(x)
-        probabilities = F.softmax(logits, dim=self.CHANNELS_DIMENSION)
-        return probabilities
-    
+        logits = self.efficientnet(x)
+        return logits
+
     def initialize_weights(self):
-        if isinstance(self.classifier, nn.Conv3d):
-            nn.init.xavier_normal_(self.classifier.weight.data)
-            if self.classifier.bias is not None:
-                nn.init.constant_(self.classifier.bias.data, 0)
+        nn.init.xavier_normal_(self.classifier.weight.data)
+        if self.classifier.bias is not None:
+            nn.init.constant_(self.classifier.bias.data, 0)
+
+        nn.init.xavier_normal_(self.features.weight.data)
+        if self.features.bias is not None:
+            nn.init.constant_(self.features.bias.data, 0)
 
 def createModel():
-    model = UNetClassifier()
+    model = efficientnetClassifier()
     model = model.to(DEVICE)
-    criterion = tr.get_dice_loss
+    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
     lr_scheduler = ExponentialLR(optimizer, gamma=0.9)
     return model, criterion, optimizer, lr_scheduler
 
 def loadData(dataset, cost):
-    sites = {0.08: [['Guys'], ['HH']],
-             0.28: [['IOP'], ['Guys']],
-             0.30: [['IOP'], ['HH']]}
-    site_names = sites[cost][dataset-1]
-
-    image_dir = os.path.join(ROOT_DIR, 'data/IXITiny/representation')
-    label_dir = os.path.join(ROOT_DIR, 'data/IXITiny/label')
-    image_files = []
-    label_files = []
-    for name in site_names:
-            image_files.extend([f'{image_dir}/{file}' for file in os.listdir(image_dir) if name in file])
-            label_files.extend([f'{label_dir}/{file}'  for file in os.listdir(label_dir) if name in file])
-    image_files, label_files = align_image_label_files(image_files, label_files)
+    train_data = dataset.FedIsic2019(train=True, data_path=DATA_DIR)
+    val_data = dataset.FedIsic2019(train=False, pooled = True, data_path=DATA_DIR)
+    train_loader = DataLoader(train_data, batch_size = BATCH_SIZE, shuffle = True)
+    val_loader = DataLoader(val_data, batch_size = BATCH_SIZE, shuffle = True)
+        
+    
     return np.array(image_files), np.array(label_files)
 
 

@@ -56,7 +56,6 @@ class ModelPipeline:
     def set_functions(self, createModelFunc):
         self.createModelFunc = createModelFunc
 
-
     def saveLosses(self, train_type, pipeline):
         self.losses_for_c[train_type]['train_losses'].append(pipeline.train_losses)
         self.losses_for_c[train_type]['val_losses'].append(pipeline.val_losses)

@@ -50,11 +50,9 @@ class Feedforward(torch.nn.Module):
                             nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
                             nn.init.constant_(layer.bias, 0)
 
-                self.sigmoid = torch.nn.Sigmoid()
 
         def forward(self, x):
                 output = self.fc(x)
-                output = self.sigmoid(output)
                 return output
         
 def createModel():

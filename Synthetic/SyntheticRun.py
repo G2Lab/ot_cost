@@ -38,7 +38,6 @@ class Feedforward(torch.nn.Module):
                                                 nn.Linear(self.hidden_size[0], self.hidden_size[1]),
                                                 nn.ReLU(),
                                                 nn.Linear(self.hidden_size[1], 1))
-                self.sigmoid = torch.nn.Sigmoid()
                 for layer in self.fc:
                         if isinstance(layer, nn.Linear):
                                 nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
@@ -46,7 +45,6 @@ class Feedforward(torch.nn.Module):
 
         def forward(self, x):
                 output = self.fc(x)
-                output = self.sigmoid(output)
                 return output
         
         

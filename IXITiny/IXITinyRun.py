@@ -21,7 +21,7 @@ from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 500
+EPOCHS = 100
 BATCH_SIZE = 64
 RUNS = 2
 DATASET = 'IXITiny'

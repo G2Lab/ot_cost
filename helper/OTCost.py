@@ -89,7 +89,7 @@ class OTCost:
         #Stability param ensures the algorithm works with the epsilon in the algorithm
         costs_stable = self.costs_all
         a, b = np.ones((costs_stable.shape[0])) / costs_stable.shape[0], np.ones((costs_stable.shape[1])) / costs_stable.shape[1]
-        self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.lam, stopThr=1e-6, numItermax=12000, warn = True, verbose=False)
+        self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.lam, stopThr=1e-6, numItermax=20000, warn = True, verbose=False)
         ot_cost = (self.Gs * self.costs_all).sum()
         print(f'cost: {"{:.2f}".format(ot_cost)}')
         return ot_cost

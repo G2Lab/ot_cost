@@ -45,7 +45,6 @@ class CustomResNet18(nn.Module):
 
     def forward(self, x):
         x = self.resnet(x)
-        x = self.softmax(x)
         return x
 
 

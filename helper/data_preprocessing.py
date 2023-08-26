@@ -7,10 +7,11 @@ from torchvision import transforms
 import nibabel as nib
 import torchio as tio
 from abc import ABC, abstractmethod
+from PIL import Image
 
 
 DATASET_TYPES_TABULAR = {'Synthetic', 'Credit', 'Weather'}
-DATASET_TYPES_IMAGE = {'CIFAR', 'EMNIST', 'IXITiny'}
+DATASET_TYPES_IMAGE = {'CIFAR', 'EMNIST', 'IXITiny', 'ISIC'}
 torch.manual_seed(1)
 np.random.seed(1)
 
@@ -67,6 +68,8 @@ class ImageDatasetHandler(AbstractDatasetHandler):
             return TensorDataset(X_tensor, y_tensor)
         elif self.dataset_name in ['IXITiny']:
             return IXITinyDataset(dl)
+        elif self.dataset_name in ['ISIC']:
+            return ISICDataset(dl)
             
         
 
@@ -95,6 +98,34 @@ class IXITinyDataset(Dataset):
         if self.transform:
             label = self.transform(label)
 
+        return image, label
+    
+
+class ISICDataset(Dataset):
+    def __init__(self, data, transform=None):
+        image_paths, labels = data
+        sz = 200
+        mean=(0.585, 0.500, 0.486)
+        std=(0.229, 0.224, 0.225)
+        self.image_paths = image_paths
+        self.labels = labels
+        self.transform = transform if transform else transforms.Compose([transforms.ToTensor(),
+                transforms.CenterCrop(sz),
+                transforms.Normalize(mean, std)
+                ])
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image_path = self.image_paths[idx]
+        label = self.labels[idx]
+
+        image = Image.open(image_path)
+        if self.transform:
+            image = self.transform(image)
+        #image = image.permute(2, 0, 1).to(torch.float32)
+        label = torch.tensor(label, dtype = torch.int64)
         return image, label
     
 

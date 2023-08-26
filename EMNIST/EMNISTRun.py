@@ -14,6 +14,7 @@ importlib.reload(pp)
 importlib.reload(pr)
 import pickle
 from torch.optim.lr_scheduler import ExponentialLR
+from multiprocessing import Pool
 
 EPOCHS = 100
 BATCH_SIZE = 5000
@@ -96,10 +97,15 @@ def run_model_for_cost(inputs):
 def main():
      ##run model on datasets
     costs = [0.11, 0.19, 0.25, 0.34, 0.39]
+
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
-    for input in inputs:
-        results.append(run_model_for_cost(input))
+    if DEVICE == 'cpu':
+        with Pool(cpu) as pool:
+            results = pool.map(run_model_for_cost, inputs)
+    else:
+        for input in inputs:
+            results.append(run_model_for_cost(input))
 
     losses = {}
     metrics_all = pd.DataFrame()

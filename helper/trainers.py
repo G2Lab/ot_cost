@@ -132,11 +132,11 @@ class ModelTrainer:
         return self.loss_function(outputs, y)
 
     def _setup_loss_function(self):
-        if self.dataset in 'IXITiny':
+        if self.dataset in ['IXITiny', 'ISIC']:
             return lambda outputs, y: self.criterion(outputs, y.float())
         elif self.dataset in DATASET_TYPES_NUMERIC:
             return lambda outputs, y: self.criterion(outputs.squeeze(), y.float().squeeze())
-        elif self.dataset in DATASET_TYPES_CATEGORICAL:
+        elif self.dataset in ['EMNIST', 'CIFAR']:
             return lambda outputs, y: self.criterion(outputs.squeeze(), y.long().squeeze())
 
 
@@ -223,6 +223,7 @@ class FederatedModelTrainer(ModelTrainer):
         self.pfedme = pfedme
         self.pfedme_reg = pfedme_reg
         self.save = False
+        self.ditto = False
 
     def _clone_model(self):
         model_clone = copy.deepcopy(self.model)
@@ -250,7 +251,7 @@ class FederatedModelTrainer(ModelTrainer):
         #print(f'Train Loss = {self.train_losses[-1]}, Val Loss = {self.val_losses[-1]}')
         if val_loss < self.best_loss:
             self.best_loss = val_loss
-            self.best_model = copy.deepcopy(self.model)
+            self.best_model = copy.deepcopy(self.model_1)
             self.early_stopping_counter = 0
         elif len(self.val_losses) >= 10 and val_loss > np.mean(self.val_losses[-5:]):
             self.early_stopping_counter += 1
@@ -278,7 +279,7 @@ class FederatedModelTrainer(ModelTrainer):
    
     def _compute_loss_fed(self, model, criterion, x, y):
         outputs = model(x.float())
-        loss_function_fed = self._setup_loss_function_fed(criterion)
+        loss_function_fed = self.loss_function
         loss = loss_function_fed(outputs, y)
         if self.pfedme:
             regularization_loss = 0
@@ -287,14 +288,6 @@ class FederatedModelTrainer(ModelTrainer):
             regularization_loss = self.pfedme_reg * regularization_loss
             loss += regularization_loss
         return loss
-
-    def _setup_loss_function_fed(self, criterion):
-        if self.dataset in 'IXITiny':
-            return lambda outputs, y: self.criterion(outputs, y.float())
-        elif self.dataset in DATASET_TYPES_NUMERIC:
-            return lambda outputs, y: criterion(outputs.squeeze(), y.float().squeeze())
-        elif self.dataset in DATASET_TYPES_CATEGORICAL:
-            return lambda outputs, y: criterion(outputs.squeeze(), y.long().squeeze())
 
     def _fed_avg(self):
         for name, param in self.model.named_parameters():
@@ -305,8 +298,14 @@ class FederatedModelTrainer(ModelTrainer):
             self.model_2.load_state_dict(self.model.state_dict())
 
     def validate(self, dataloader_1, dataloader_2):
-        self.model_1.eval()
-        self.model_2.eval()
+        if not self.ditto:
+            model_1 =  self.model_1
+            model_2 = self.model_2
+        else:
+            model_1 =  self.model_1_p
+            model_2 = self.model_2_p
+        model_1.eval()
+        model_2.eval()
         val_loss_1, val_loss_2 = 0, 0
         
         for x, y in dataloader_1:
@@ -329,6 +328,79 @@ class FederatedModelTrainer(ModelTrainer):
 
     def _get_site_objects(self, site_number):
         return (self.model_1, self.criterion_1, self.optimizer_1, self.lr_scheduler_1) if site_number == 1 else (self.model_2, self.criterion_2, self.optimizer_2, self.lr_scheduler_2)
+
+class DittoFederatedModelTrainer(FederatedModelTrainer):
+    def __init__(self, dataset, model, optimizer, criterion, lr_scheduler, device, dataloader_1, dataloader_2, reg = 0.1):
+        super().__init__(dataset, model, optimizer, criterion, lr_scheduler, device, dataloader_1, dataloader_2)
+        self.reg = reg
+        self.model_1_p, self.criterion_1_p, self.optimizer_1_p, self.lr_scheduler_1_p = self._clone_model()
+        self.model_2_p, self.criterion_2_p, self.optimizer_2_p, self.lr_scheduler_2_p = self._clone_model()
+        self.ditto = True
+
+
+    def fit(self, data_loader_1, data_loader_2, val_data_loader_1, val_data_loader_2):
+        self.model_1.train()
+        self.model_2.train()
+        self.model_1_p.train()
+        self.model_2_p.train()
+        for i in range(FED_EPOCH):
+            if i == FED_EPOCH - 1:
+                self.save = True
+            else:
+                self.save = False
+            self._train_site(data_loader_1, 1)
+            self._train_site(data_loader_2, 2)
+            self._train_site_personal(data_loader_1, 1)
+            self._train_site_personal(data_loader_2, 2)
+
+        self._fed_avg()
+        val_loss = self.validate(val_data_loader_1, val_data_loader_2)
+        self.val_losses.append(val_loss)
+
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            self.best_model = copy.deepcopy(self.model_1_p)
+            self.early_stopping_counter = 0
+        elif len(self.val_losses) >= 10 and val_loss > np.mean(self.val_losses[-5:]):
+            self.early_stopping_counter += 1
+            if self.early_stopping_counter >= self.patience:
+                print("Early stopping")
+                self.stopping = True
+        else:
+            self.early_stopping_counter = 0
+
+    def _train_site_personal(self, data_loader, site_number):
+        model_site, _, _, _   = self._get_site_objects(site_number)
+        model_site_p, optimizer_site_p, lr_scheduler_site_p = self._get_site_personal_objects(site_number)
+        train_loss = 0
+        for x, y in data_loader:
+            x, y = to_device(x, self.device), to_device(y, self.device)
+            loss = self._compute_loss_personal(model_site, model_site_p, x, y)
+            train_loss += loss.item()
+            model_site_p.zero_grad()
+            loss.backward()
+            optimizer_site_p.step()
+            lr_scheduler_site_p.step() 
+        train_loss /= len(data_loader)
+        if (site_number == 1) and (self.save):
+            #replace the loss from the fedavg with this
+            self.train_losses[-1] = train_loss
+
+    def _compute_loss_personal(self, model_site, model_site_p, x, y):
+        outputs = model_site_p(x.float())
+        loss_function_personal = self.loss_function
+        loss = loss_function_personal(outputs, y)
+        regularization_loss = 0
+        for p, g_p in zip(model_site.parameters(), model_site_p.parameters()):
+            regularization_loss += torch.norm(p - g_p)
+            regularization_loss = self.reg * regularization_loss
+        loss = loss + regularization_loss
+        return loss
+
+    def _get_site_personal_objects(self, site_number):
+        return (self.model_1_p, self.optimizer_1_p, self.lr_scheduler_1_p) if site_number == 1 else (self.model_2_p, self.optimizer_2_p, self.lr_scheduler_2_p)
+
+
 
 class MAMLModelTrainer(FederatedModelTrainer):
     def __init__(self, dataset, model, optimizer, criterion, lr_scheduler, device, dataloader_1, dataloader_2):
@@ -422,8 +494,6 @@ class MAMLModelTrainer(FederatedModelTrainer):
         x1, y1 = to_device(x1, self.device), to_device(y1, self.device)
         x2, y2 = to_device(x2, self.device), to_device(y2, self.device)
         x3, y3 = to_device(x3, self.device), to_device(y3, self.device)
-
-
         return x1, y1, x2, y2, x3, y3
 
 

@@ -41,7 +41,7 @@ class efficientnetClassifier(nn.Module):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
-        self.efficientnet.classifier.fc = nn.Linear(1280, 7)
+        self.efficientnet.classifier.fc = nn.Linear(1280, 8)
 
     def forward(self, x):
         logits = self.efficientnet(x)
@@ -63,18 +63,12 @@ class WeightedFocalLoss(nn.Module):
         self.gamma = 2
 
     def forward(self, inputs, targets):
-        # Calculate cross-entropy term
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
-
-        # Calculate probabilities and focal weights
+        targets_one_hot = F.one_hot(targets, num_classes=inputs.size(1)).float()
+        ce_loss = F.cross_entropy(inputs, targets_one_hot, reduction='none')
         probs = F.softmax(inputs, dim=1)
         focal_weights = (1 - probs) ** self.gamma
-
-        # Calculate weighted focal loss
-        weighted_focal_loss = self.alpha * focal_weights * ce_loss
-
+        weighted_focal_loss = self.alpha * focal_weights * ce_loss.unsqueeze(1)
         return torch.mean(weighted_focal_loss)
-
 
 def createModel():
     model = efficientnetClassifier()

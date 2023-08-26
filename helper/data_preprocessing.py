@@ -91,11 +91,12 @@ class IXITinyDataset(Dataset):
     def __getitem__(self, idx):
         image_path = self.image_paths[idx]
         label_path = self.label_paths[idx]
-
-        image = torch.load(image_path)
+        #image = torch.load(image_path)
+        image = torch.tensor(nib.load(image_path).get_fdata(), dtype=torch.float).unsqueeze(0)
         label = torch.tensor(nib.load(label_path).get_fdata(), dtype=torch.float).unsqueeze(0)
 
         if self.transform:
+            image = self.transform(image)
             label = self.transform(label)
 
         return image, label

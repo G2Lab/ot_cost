@@ -7,7 +7,7 @@ from scipy.stats import bootstrap
 global ROOT_DIR
 ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 SAVE_DIR = f'{ROOT_DIR}/results'
-ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme']
+ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'ditto']
 
 def load_results(DATASET, name):
     return pd.read_csv(f'{ROOT_DIR}/results/{DATASET}/{name}')

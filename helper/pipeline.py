@@ -19,11 +19,11 @@ warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overri
 
 global DEVICE
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme']
+ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'ditto']
 
 class ModelPipeline:
     def __init__(self, c, loadDataFunc, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS):
-        self.ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme']
+        self.ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'ditto']
         self.CATEGORICAL_CLASSES = ['EMNIST', 'CIFAR']
         self.c = c
         self.loadDataFunc = loadDataFunc
@@ -70,8 +70,9 @@ class ModelPipeline:
         self.federated(X1, y1, X2, y2)
         self.federated(X1, y1, X2, y2, pfedme = True)
         #self.maml(X1, y1, X2, y2)
-
-        metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics]
+        self.ditto(X1, y1, X2, y2)
+        #ADD ditto test metrics once merged fully
+        metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
         metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T
         metrics_df['cost'] = self.c
         return metrics_df
@@ -169,6 +170,22 @@ class ModelPipeline:
         maml_test_metrics = maml_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
         self.maml_test_metrics = maml_test_metrics
         self.saveLosses('maml', maml_run_pipeline)
+        return
+
+    def ditto(self, X1, y1, X2, y2):
+        self.SINGLE = False
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
+        train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
+        train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
+        ditto_run_pipeline = tr.DittoFederatedModelTrainer(self.DATASET, model, optimizer, criterion,lr_scheduler, self.DEVICE, train_loader_1, train_loader_2)
+        epoch = 0
+        while (not ditto_run_pipeline.stopping) & (epoch < self.EPOCHS // tr.FED_EPOCH):
+            ditto_run_pipeline.fit(train_loader_1, train_loader_2, val_loader_1, val_loader_2)
+            epoch +=1
+        ditto_test_metrics = ditto_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
+        self.ditto_test_metrics = ditto_test_metrics
+        self.saveLosses('ditto', ditto_run_pipeline)
         return
 
 

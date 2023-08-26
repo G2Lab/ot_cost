@@ -38,7 +38,7 @@ class UNetClassifier(nn.Module):
         self.CHANNELS_DIMENSION = 1
         self.SPATIAL_DIMENSIONS = 2, 3, 4
 
-        unet = UNet(
+        self.model = UNet(
             in_channels=1,
             out_classes=2,
             dimensions=3,
@@ -49,19 +49,14 @@ class UNetClassifier(nn.Module):
             padding=True,
             activation='PReLU',
         )
+        checkpoint = torch.load(f'{ROOT_DIR}/data/IXITiny/whole_images_epoch_5.pth', map_location=torch.device('cpu'))
+        self.model.load_state_dict(checkpoint['weights'])
 
-        # Make all other parameters untrainable
-        for name, param in unet.named_parameters():
-            if 'classifier' not in name:
-                param.requires_grad = False
-
-        self.classifier = unet.classifier
-        self.initialize_weights()
-        del unet
+        for name, param in self.named_parameters():
+                param.requires_grad = True
 
     def forward(self, x):
-        #unet has been removed as we save the representation up until then
-        logits = self.classifier(x)
+        logits = self.model(x)
         probabilities = F.softmax(logits, dim=self.CHANNELS_DIMENSION)
         return probabilities
     
@@ -85,7 +80,7 @@ def loadData(dataset, cost):
              0.30: [['IOP'], ['HH']]}
     site_names = sites[cost][dataset-1]
 
-    image_dir = os.path.join(ROOT_DIR, 'data/IXITiny/representation')
+    image_dir = os.path.join(ROOT_DIR, 'data/IXITiny/image')
     label_dir = os.path.join(ROOT_DIR, 'data/IXITiny/label')
     image_files = []
     label_files = []
@@ -94,7 +89,6 @@ def loadData(dataset, cost):
             label_files.extend([f'{label_dir}/{file}'  for file in os.listdir(label_dir) if name in file])
     image_files, label_files = align_image_label_files(image_files, label_files)
     return np.array(image_files), np.array(label_files)
-
 
 def get_common_name(full_path):
     return os.path.basename(full_path).split('_')[0]
@@ -145,9 +139,9 @@ def main():
     ##Save results
     path_save = f'{ROOT_DIR}/results/{DATASET}'
     cost = f'{costs[0]}-{costs[-1]}'
-    metrics_all.to_csv(f'{path_save}/{METRIC_TEST}_{cost}.csv', index=False)
-    test_losses_df.to_csv(f'{path_save}/losses_{cost}.csv', index=False)
-    with open(f'{path_save}/losses.pkl', 'wb') as f:
+    metrics_all.to_csv(f'{path_save}/{METRIC_TEST}_{cost}_f.csv', index=False)
+    test_losses_df.to_csv(f'{path_save}/losses_{cost}_f.csv', index=False)
+    with open(f'{path_save}/losses_f.pkl', 'wb') as f:
         pickle.dump(losses_df, f)
 
 

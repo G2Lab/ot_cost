@@ -55,7 +55,7 @@ def bootstrap_samples(data, n_iterations):
     return data[indices]
 
 
-def grapher(results, DATASET, metric, costs, save = False):
+def grapher(results, DATASET, metric, costs, save):
     results_long = results.reset_index().rename(columns={'index': 'cost'}).melt(id_vars=['cost'], var_name='architecture')
     results_long[['median_diff', 'lower_ci_diff', 'upper_ci_diff']] = pd.DataFrame(results_long['value'].tolist(), index=results_long.index)
     results_long.drop(columns=['value'], inplace=True)
@@ -92,10 +92,10 @@ def process_results(DATASET, metric, costs, save = False):
     process_result(DATASET, metric, costs, save)
     process_result(DATASET, 'losses', costs, save)
     grapher_losses(DATASET, costs, save)
-    grapher_grad_div(DATASET, costs, save=False)
+    grapher_grad_div(DATASET, costs, save)
     return
 
-def grapher_losses(DATASET, costs, save=False):
+def grapher_losses(DATASET, costs, save):
     with open(f'{ROOT_DIR}/results/{DATASET}/losses.pkl', 'rb') as f:
         losses = pickle.load(f)
     colors = sns.color_palette('tab10', n_colors=len(costs))
@@ -120,7 +120,7 @@ def grapher_losses(DATASET, costs, save=False):
         plt.show()
     return
 
-def grapher_grad_div(DATASET, costs, save=False):
+def grapher_grad_div(DATASET, costs, save):
     cost_range = f'{costs[0]}-{costs[-1]}'
     df = pd.read_csv(f'{ROOT_DIR}/results/{DATASET}/grad_div_{cost_range}.csv')
     plt.figure(figsize=(10, 6))

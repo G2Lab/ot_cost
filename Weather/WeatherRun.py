@@ -71,7 +71,7 @@ def loadData(dataset, cost):
 def run_model_for_cost(inputs):
     c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS = inputs
     mp = pp.ModelPipeline(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS)
-    mp.set_functions(createModel())
+    mp.set_functions(createModel)
     return mp.run_model_for_cost()
 
 

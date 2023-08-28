@@ -2,6 +2,7 @@ global ROOT_DIR
 ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 
 import pandas as pd
+import os
 import torch
 import torch.nn as nn
 import sys
@@ -15,13 +16,14 @@ importlib.reload(pr)
 import pickle
 from torchvision import models
 from torch.optim.lr_scheduler import ExponentialLR
+from multiprocessing import Pool
 
-EPOCHS = 50
+EPOCHS = 100
 BATCH_SIZE = 256
-RUNS = 75
+RUNS = 5
 DATASET = 'CIFAR'
 METRIC_TEST = 'Accuracy'
-LEARNING_RATE = 5e-3
+LEARNING_RATE = 5e-2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CustomResNet18(nn.Module):
@@ -48,11 +50,7 @@ class CustomResNet18(nn.Module):
         return x
 
 
-def createModel(mp):
-    if mp.SINGLE:
-        CLASSES = mp.SINGLE_CLASS
-    else:
-        CLASSES = mp.MSL_CLASS
+def createModel():
     model = CustomResNet18(CLASSES)
     model.to(DEVICE)
     criterion = nn.CrossEntropyLoss()
@@ -61,7 +59,7 @@ def createModel(mp):
     return model, criterion, optimizer, lr_scheduler
 
 
-def sample_per_class(labels, class_size = 100):
+def sample_per_class(labels, class_size = 50):
   df = pd.DataFrame({'labels': labels})
   df_stratified = df.groupby('labels').apply(lambda x: x.sample(class_size, replace=False))
   ind = df_stratified.index.get_level_values(1)
@@ -77,7 +75,7 @@ def loadData(dataset, cost):
     ##get X and label
     X = data['data']
     y = data['labels']
-    class_size = 100
+    class_size = 50
     ind = sample_per_class(y, class_size)
     X_sample =  X[ind]
     y_sample = y[ind]
@@ -87,17 +85,27 @@ def loadData(dataset, cost):
 def run_model_for_cost(inputs):
     c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS = inputs
     mp = pp.ModelPipeline(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS)
-    mp.set_functions(createModel(mp))
+    global CLASSES
+    if mp.SINGLE:
+        CLASSES = mp.SINGLE_CLASS
+    else:
+        CLASSES = mp.MSL_CLASS
+    mp.set_functions(createModel)
     return mp.run_model_for_cost()
 
 
 def main():
      ##run model on datasets
+    cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
     costs = [0.08, 0.21, 0.3, 0.38]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
-    for input in inputs:
-        results.append(run_model_for_cost(input))
+    if DEVICE == 'cpu':
+        with Pool(cpu) as pool:
+            results = pool.map(run_model_for_cost, inputs)
+    else:
+        for input in inputs:
+            results.append(run_model_for_cost(input))
 
     losses = {}
     metrics_all = pd.DataFrame()

@@ -36,6 +36,7 @@ class ModelPipeline:
         self.SINGLE = False
         self.SINGLE_CLASS = None
         self.MSL_CLASS = None
+        self.gradient_diversity_for_c = []
 
         _, y1 = self.loadDataFunc(1, self.c)
         _, y2 = self.loadDataFunc(2, self.c)
@@ -90,7 +91,7 @@ class ModelPipeline:
 
     def single(self, X1, y1):
         self.SINGLE = True
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader, val_loader, test_loader = dataloader.preprocess(X1, y1)
         run_pipeline = tr.ModelTrainer(self.DATASET, model, optimizer, criterion, lr_scheduler, DEVICE)
@@ -106,7 +107,7 @@ class ModelPipeline:
 
     def joint(self, X1, y1, X2, y2):
         self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader, val_loader, test_loader = dataloader.preprocess_joint(X1, y1, X2, y2)
         run_pipeline = tr.ModelTrainer(self.DATASET, model, optimizer, criterion, lr_scheduler, self.DEVICE)
@@ -121,7 +122,7 @@ class ModelPipeline:
 
     def transfer(self, X1, y1, X2, y2):
         self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader_target, val_loader_target, test_loader_target = dataloader.preprocess(X1, y1)
         train_loader_source, val_loader_source, _ = dataloader.preprocess(X2, y2)
@@ -137,7 +138,7 @@ class ModelPipeline:
 
     def federated(self, X1, y1, X2, y2, pfedme=False, pfedme_reg=1e-1):
         self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
         train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
@@ -151,6 +152,7 @@ class ModelPipeline:
         if not pfedme:
             self.fedavg_test_metrics = fed_test_metrics 
             self.saveLosses('federated', federated_run_pipeline)
+            self.gradient_diversity_for_c.append(np.array(federated_run_pipeline.gradient_diversity).reshape(1,-1))
         elif pfedme: 
             self.pfedme_test_metrics = fed_test_metrics 
             self.saveLosses('pfedme', federated_run_pipeline)
@@ -158,7 +160,7 @@ class ModelPipeline:
     
     def maml(self, X1, y1, X2, y2):
         self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
         train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
@@ -174,7 +176,7 @@ class ModelPipeline:
 
     def ditto(self, X1, y1, X2, y2):
         self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc
+        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
         dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
         train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
         train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
@@ -197,7 +199,13 @@ class ModelPipeline:
         for _ in range(self.RUNS):
             metrics_run = self.runModels()
             metrics_for_c = pd.concat([metrics_for_c, metrics_run], axis=0)
-        return self.c, self.losses_for_c, metrics_for_c
+        
+        gradient_diversity = np.full((self.RUNS, self.EPOCHS), np.nan)
+        for i, arr in enumerate(self.gradient_diversity_for_c):
+            arr = arr.reshape(-1)
+            gradient_diversity[i, :len(arr)] = arr
+
+        return self.c, self.losses_for_c, metrics_for_c, gradient_diversity
 
 
 def loss_dictionary_to_dataframe(losses, costs, RUNS):
@@ -224,3 +232,15 @@ def loss_dictionary_to_dataframe(losses, costs, RUNS):
     test_losses_df = pd.DataFrame.from_dict(test_losses_df, orient = 'index').T
     test_losses_df['cost'] =  [item for item in costs for _ in range(RUNS)]
     return losses_df, test_losses_df
+
+def gradient_dictionary_to_dataframe(gradient_diversity):
+    rows_list = []
+    for cost, arr in gradient_diversity.items():
+        num_runs, num_epochs = arr.shape
+        for run in range(num_runs):
+            for epoch in range(num_epochs):
+                value = arr[run, epoch]
+                rows_list.append({'Cost': cost, 'Epoch': epoch, 'Run': run, 'Value': value})
+    df = pd.DataFrame(rows_list)
+    return df
+

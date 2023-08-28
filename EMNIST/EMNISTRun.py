@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import sys
+import os
 import numpy as np
 sys.path.append(f'{ROOT_DIR}/code/helper')
 import pipeline as pp
@@ -16,9 +17,9 @@ import pickle
 from torch.optim.lr_scheduler import ExponentialLR
 from multiprocessing import Pool
 
-EPOCHS = 100
+EPOCHS = 200
 BATCH_SIZE = 5000
-RUNS = 100
+RUNS = 10
 DATASET = 'EMNIST'
 METRIC_TEST = 'Accuracy'
 LEARNING_RATE = 5e-3
@@ -56,11 +57,7 @@ class LeNet5(nn.Module):
         out = self.fc2(out)
         return out
         
-def createModel(mp):
-    if mp.SINGLE:
-        CLASSES = mp.SINGLE_CLASS
-    else:
-        CLASSES = mp.MSL_CLASS
+def createModel():
     model = LeNet5(CLASSES)
     model.to(DEVICE)
     criterion = nn.CrossEntropyLoss()
@@ -69,7 +66,7 @@ def createModel(mp):
     return model, criterion, optimizer, lr_scheduler
 
 
-def sample_per_class(labels, class_size = 100):
+def sample_per_class(labels, class_size):
   df = pd.DataFrame({'labels': labels})
   df_stratified = df.groupby('labels').apply(lambda x: x.sample(class_size, replace=False))
   ind = df_stratified.index.get_level_values(1)
@@ -81,7 +78,7 @@ def loadData(dataset, cost):
     ##get X and label
     X = data['data']
     y = data['labels']
-    class_size = 100
+    class_size = 30
     ind = sample_per_class(y, class_size)
     X_sample =  X[ind]
     y_sample = y[ind]
@@ -90,14 +87,19 @@ def loadData(dataset, cost):
 def run_model_for_cost(inputs):
     c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS = inputs
     mp = pp.ModelPipeline(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS)
-    mp.set_functions(createModel(mp))
+    global CLASSES
+    if mp.SINGLE:
+        CLASSES = mp.SINGLE_CLASS
+    else:
+        CLASSES = mp.MSL_CLASS
+    mp.set_functions(createModel)
     return mp.run_model_for_cost()
 
 
 def main():
      ##run model on datasets
     costs = [0.11, 0.19, 0.25, 0.34, 0.39]
-
+    cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
     if DEVICE == 'cpu':

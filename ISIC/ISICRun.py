@@ -23,12 +23,12 @@ from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 100
-BATCH_SIZE = 256
+EPOCHS = 1000
+BATCH_SIZE = 512
 RUNS = 2
 DATASET = 'ISIC'
 METRIC_TEST = 'Balanced_accuracy'
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -79,7 +79,7 @@ def createModel():
     return model, criterion, optimizer, lr_scheduler
 
 def loadData(dataset, cost):
-    dataset_pairings = {0.08: (0,0), 0.15:(0,2), 0.17:(2,5), 0.21:(3,5), 0.25:(1,2), 0.28:(1,4), 0.3:{1,3}}
+    dataset_pairings = {0.08: (0,0), 0.15:(0,2), 0.17:(2,5), 0.21:(3,5), 0.25:(1,2), 0.28:(1,4), 0.3:(1,3)}
     site = dataset_pairings[cost][dataset-1]
     files = pd.read_csv(f'{ROOT_DIR}/data/ISIC/site_{site}_files_used.csv')
     image_files = [f'{ROOT_DIR}/data/ISIC/ISIC_2019_Training_Input_preprocessed/{file}.jpg' for file in files['image']]
@@ -101,14 +101,14 @@ def align_image_label_files(image_files, label_files):
 def run_model_for_cost(inputs):
     c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS = inputs
     mp = pp.ModelPipeline(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS)
-    mp.set_functions(createModel())
+    mp.set_functions(createModel)
     return mp.run_model_for_cost()
 
 
 def main():
      ##run model on datasets
     cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
-    costs = [0.08, 0.15, 0.17, 0.21, 0.25, 0.28, 0.3]
+    costs = [0.08, 0.15, 0.3]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
     if DEVICE == 'cpu':

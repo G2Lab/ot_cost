@@ -21,9 +21,9 @@ from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 100
+EPOCHS = 1000
 BATCH_SIZE = 64
-RUNS = 2
+RUNS = 1
 DATASET = 'IXITiny'
 METRIC_TEST = 'DICE'
 LEARNING_RATE = 1e-2
@@ -131,6 +131,7 @@ def main():
     try:
         for col in metrics_all.columns:
             metrics_all[col] = metrics_all[col].apply(lambda x: x.item() if isinstance(x, (torch.Tensor, np.ndarray)) and x.size == 1 else x)
+            metrics_all[col] = metrics_all[col].apply(lambda x: float(x.strip('tensor(').strip(')')) if isinstance(x, (str)) else x)
     except:
         pass
     losses_df, test_losses_df = pp.loss_dictionary_to_dataframe(losses, costs, RUNS)
@@ -146,8 +147,8 @@ def main():
 
 
     ##Process results and graph
-    save = True
-    pr.process_results(DATASET, METRIC_TEST, costs, save)
+    #save = True
+    #pr.process_results(DATASET, METRIC_TEST, costs, save)
 
 if __name__ == '__main__':
     main()

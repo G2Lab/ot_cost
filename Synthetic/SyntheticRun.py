@@ -17,12 +17,12 @@ import pickle
 from multiprocessing import Pool
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 300
+EPOCHS = 100
 BATCH_SIZE = 2000
-RUNS = 500
+RUNS = 10
 DATASET = 'Synthetic'
 METRIC_TEST = 'AUC'
-LEARNING_RATE = 5e-2
+LEARNING_RATE = 1e-2
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -50,6 +50,7 @@ class Feedforward(torch.nn.Module):
                 return output
         
         
+        
 def createModel():
     model = Feedforward()
     model.to(DEVICE)
@@ -62,7 +63,7 @@ def createModel():
 def loadData(dataset, cost):
     ##load data
     X = pd.read_csv(f'{ROOT_DIR}/data/{DATASET}/data_{dataset}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(13)])
-    X = X.sample(n = 100)
+    X = X.sample(n = 400)
 
     ##get X and label
     y = X.iloc[:,-1]
@@ -72,7 +73,7 @@ def loadData(dataset, cost):
 def run_model_for_cost(inputs):
     c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS = inputs
     mp = pp.ModelPipeline(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS)
-    mp.set_functions(createModel())
+    mp.set_functions(createModel)
     return mp.run_model_for_cost()
 
 
@@ -85,12 +86,15 @@ def main():
         results = pool.map(run_model_for_cost, inputs)
 
     losses = {}
+    gradient_diversity= {}
     metrics_all = pd.DataFrame()
-    for c, loss, metrics in results:
+    for c, loss, metrics, grad_div in results:
         losses[c] = loss
+        gradient_diversity[c] = grad_div
         metrics_all = pd.concat([metrics_all, metrics], axis=0)
     metrics_all.reset_index(inplace = True, drop = True)
     losses_df, test_losses_df = pp.loss_dictionary_to_dataframe(losses, costs, RUNS)
+    grad_div_df = pp.gradient_dictionary_to_dataframe(gradient_diversity)
     
 
     ##Save results
@@ -98,6 +102,8 @@ def main():
     cost = f'{costs[0]}-{costs[-1]}'
     metrics_all.to_csv(f'{path_save}/{METRIC_TEST}_{cost}.csv', index=False)
     test_losses_df.to_csv(f'{path_save}/losses_{cost}.csv', index=False)
+    grad_div_df.to_csv(f'{path_save}/grad_div_{cost}.csv', index=False)
+
     with open(f'{path_save}/losses.pkl', 'wb') as f:
         pickle.dump(losses_df, f)
 

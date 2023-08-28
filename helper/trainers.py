@@ -132,11 +132,11 @@ class ModelTrainer:
         return self.loss_function(outputs, y)
 
     def _setup_loss_function(self):
-        if self.dataset in ['IXITiny', 'ISIC']:
+        if self.dataset in ['IXITiny']:
             return lambda outputs, y: self.criterion(outputs, y.float())
         elif self.dataset in DATASET_TYPES_NUMERIC:
             return lambda outputs, y: self.criterion(outputs.squeeze(), y.float().squeeze())
-        elif self.dataset in ['EMNIST', 'CIFAR']:
+        elif self.dataset in DATASET_TYPES_CATEGORICAL:
             return lambda outputs, y: self.criterion(outputs.squeeze(), y.long().squeeze())
 
 
@@ -206,7 +206,8 @@ class TransferModelTrainer(ModelTrainer):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            self.lr_scheduler.step()
+            if target:
+                self.lr_scheduler.step()
         return loss
 
 
@@ -224,6 +225,7 @@ class FederatedModelTrainer(ModelTrainer):
         self.pfedme_reg = pfedme_reg
         self.save = False
         self.ditto = False
+        self.gradient_diversity = []
 
     def _clone_model(self):
         model_clone = copy.deepcopy(self.model)
@@ -242,6 +244,9 @@ class FederatedModelTrainer(ModelTrainer):
                 self.save = False
             self._train_site(data_loader_1, 1)
             self._train_site(data_loader_2, 2)
+            if (not self.pfedme) & (not self.ditto):
+                grad_div = self._calculate_gradient_diversity()
+                self.gradient_diversity.append(grad_div)
         
         self._fed_avg()
 
@@ -296,6 +301,22 @@ class FederatedModelTrainer(ModelTrainer):
         if not self.pfedme:
             self.model_1.load_state_dict(self.model.state_dict())
             self.model_2.load_state_dict(self.model.state_dict())
+    
+    def _calculate_gradient_diversity(self):
+        grads = {'model_1': {}, 'model_2': {}}
+        for name, param in self.model_1.named_parameters():
+                grads['model_1'][name] = param.grad.clone().detach()
+
+        for name, param in self.model_2.named_parameters():
+                grads['model_2'][name] = param.grad.clone().detach()
+
+        model_1_w = torch.cat([w.flatten() for w in grads['model_1'].values()])
+        model_2_w = torch.cat([w.flatten() for w in grads['model_2'].values()])
+        num = torch.norm(model_1_w)**2  + torch.norm(model_2_w)**2
+        denom = torch.norm(model_1_w + model_2_w)**2
+        gradient_diversity_metric = (num/ denom).numpy()
+        return gradient_diversity_metric
+
 
     def validate(self, dataloader_1, dataloader_2):
         if not self.ditto:

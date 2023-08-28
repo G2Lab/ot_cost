@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pickle
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -90,9 +91,13 @@ def process_result(DATASET, metric, costs, save):
 def process_results(DATASET, metric, costs, save = False):
     process_result(DATASET, metric, costs, save)
     process_result(DATASET, 'losses', costs, save)
+    grapher_losses(DATASET, costs, save)
+    grapher_grad_div(DATASET, costs, save=False)
     return
 
-def grapher_losses(losses, DATASET, costs, save=False):
+def grapher_losses(DATASET, costs, save=False):
+    with open(f'{ROOT_DIR}/results/{DATASET}/losses.pkl', 'rb') as f:
+        losses = pickle.load(f)
     colors = sns.color_palette('tab10', n_colors=len(costs))
     for arch in losses.keys():
         df = losses[arch]
@@ -113,4 +118,20 @@ def grapher_losses(losses, DATASET, costs, save=False):
         if save:
             plt.savefig(f'{SAVE_DIR}/{DATASET}/loss_{arch}.pdf', bbox_inches='tight')
         plt.show()
+    return
+
+def grapher_grad_div(DATASET, costs, save=False):
+    cost_range = f'{costs[0]}-{costs[-1]}'
+    df = pd.read_csv(f'{ROOT_DIR}/results/{DATASET}/grad_div_{cost_range}.csv')
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=df, x='Epoch', y='Value', hue='Cost')
+    plt.xlabel('Epoch', fontsize=14)
+    plt.ylabel('Gradient', fontsize=14)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.legend(fontsize=14, bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    if save:
+        plt.savefig(f'{SAVE_DIR}/{DATASET}/gradient_diversity.pdf', bbox_inches='tight')
+    plt.show()
     return

@@ -121,12 +121,14 @@ def grapher_losses(DATASET, costs, save):
     return
 
 def grapher_grad_div(DATASET, costs, save):
+    colors = sns.color_palette('tab10', n_colors=len(costs))
     cost_range = f'{costs[0]}-{costs[-1]}'
     df = pd.read_csv(f'{ROOT_DIR}/results/{DATASET}/grad_div_{cost_range}.csv')
+    df_filtered = df[df['Epoch'] % 10 == 0]
     plt.figure(figsize=(10, 6))
-    sns.lineplot(data=df, x='Epoch', y='Value', hue='Cost')
+    sns.lineplot(data=df_filtered, x='Epoch', y='Value', hue='Cost', color = colors)
     plt.xlabel('Epoch', fontsize=14)
-    plt.ylabel('Gradient', fontsize=14)
+    plt.ylabel('Gradient diversity', fontsize=14)
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
     plt.legend(fontsize=14, bbox_to_anchor=(1.05, 1), loc='upper left')

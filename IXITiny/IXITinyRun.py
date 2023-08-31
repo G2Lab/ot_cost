@@ -21,12 +21,12 @@ from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
-EPOCHS = 1000
-BATCH_SIZE = 64
+EPOCHS = 100
+BATCH_SIZE = 12
 RUNS = 1
 DATASET = 'IXITiny'
 METRIC_TEST = 'DICE'
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHANNELS_DIMENSION = 1
 SPATIAL_DIMENSIONS = 2, 3, 4
@@ -66,10 +66,27 @@ class UNetClassifier(nn.Module):
             if self.classifier.bias is not None:
                 nn.init.constant_(self.classifier.bias.data, 0)
 
+def get_dice_score(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):
+    p0 = output
+    g0 = target
+    p1 = 1 - p0
+    g1 = 1 - g0
+    tp = (p0 * g0).sum(dim=SPATIAL_DIMENSIONS)
+    fp = (p0 * g1).sum(dim=SPATIAL_DIMENSIONS)
+    fn = (p1 * g0).sum(dim=SPATIAL_DIMENSIONS)
+    num = 2 * tp
+    denom = 2 * tp + fp + fn + epsilon
+    dice_score = num / denom
+    return dice_score
+
+def get_dice_loss(output, target):
+    return torch.mean(1 - get_dice_score(output, target))
+
+
 def createModel():
     model = UNetClassifier()
     model = model.to(DEVICE)
-    criterion = tr.get_dice_loss
+    criterion = get_dice_loss
     optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
     lr_scheduler = ExponentialLR(optimizer, gamma=0.9)
     return model, criterion, optimizer, lr_scheduler
@@ -104,7 +121,7 @@ def align_image_label_files(image_files, label_files):
 def run_model_for_cost(inputs):
     c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS = inputs
     mp = pp.ModelPipeline(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS)
-    mp.set_functions(createModel())
+    mp.set_functions(createModel)
     return mp.run_model_for_cost()
 
 

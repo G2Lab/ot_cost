@@ -9,7 +9,8 @@ import torchio as tio
 from abc import ABC, abstractmethod
 from PIL import Image
 
-
+global ROOT_DIR
+ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 DATASET_TYPES_TABULAR = {'Synthetic', 'Credit', 'Weather'}
 DATASET_TYPES_IMAGE = {'CIFAR', 'EMNIST', 'IXITiny', 'ISIC'}
 torch.manual_seed(1)
@@ -77,11 +78,16 @@ class IXITinyDataset(Dataset):
     def __init__(self, data, transform=None):
         image_paths, label_paths = data
         self.image_paths = image_paths
+        landmarks = tio.HistogramStandardization.train(
+                        image_paths,
+                        output_path=f'{ROOT_DIR}/data/IXITiny/landmarks.npy')
         self.label_paths = label_paths
         self.transform = transform if transform else tio.Compose([
                             tio.ToCanonical(),
                             tio.Resample(4),
                             tio.CropOrPad((48, 60, 48)),
+                            #tio.HistogramStandardization({'mri': landmarks}),
+                            tio.ZNormalization(masking_method=tio.ZNormalization.mean),
                             tio.OneHot()
                         ])
 
@@ -125,7 +131,6 @@ class ISICDataset(Dataset):
         image = Image.open(image_path)
         if self.transform:
             image = self.transform(image)
-        #image = image.permute(2, 0, 1).to(torch.float32)
         label = torch.tensor(label, dtype = torch.int64)
         return image, label
     

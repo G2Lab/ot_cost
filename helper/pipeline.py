@@ -72,7 +72,6 @@ class ModelPipeline:
         self.federated(X1, y1, X2, y2, pfedme = True)
         #self.maml(X1, y1, X2, y2)
         self.ditto(X1, y1, X2, y2)
-        #ADD ditto test metrics once merged fully
         metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
         metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T
         metrics_df['cost'] = self.c
@@ -102,6 +101,8 @@ class ModelPipeline:
             epoch += 1
 
         self.single_test_metrics = run_pipeline.test(test_loader, metric_name=self.METRIC_TEST)
+        save_model = run_pipeline.best_model
+        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_single_{self.c}.pth')
         self.saveLosses('single', run_pipeline)
         return 
 
@@ -117,6 +118,8 @@ class ModelPipeline:
             run_pipeline.fit(train_loader, val_loader)
             epoch += 1
         self.joint_test_metrics = run_pipeline.test(test_loader, metric_name=self.METRIC_TEST)
+        save_model = run_pipeline.best_model
+        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_joint_{self.c}.pth')
         self.saveLosses('joint', run_pipeline)
         return
 
@@ -133,6 +136,8 @@ class ModelPipeline:
             transfer_run_pipeline.fit(train_loader_target, train_loader_source, val_loader_target, val_loader_source)
             epoch +=1
         self.transfer_test_metrics = transfer_run_pipeline.test(test_loader_target, metric_name=self.METRIC_TEST)
+        save_model = transfer_run_pipeline.best_model
+        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_transfer_{self.c}.pth')
         self.saveLosses('transfer', transfer_run_pipeline)
         return 
 
@@ -150,11 +155,15 @@ class ModelPipeline:
             epoch +=1
         fed_test_metrics = federated_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
         if not pfedme:
-            self.fedavg_test_metrics = fed_test_metrics 
+            self.fedavg_test_metrics = fed_test_metrics
+            save_model = federated_run_pipeline.best_model
+            torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_fed_{self.c}.pth')
             self.saveLosses('federated', federated_run_pipeline)
-            self.gradient_diversity_for_c.append(np.array(federated_run_pipeline.gradient_diversity).reshape(1,-1))
+            #self.gradient_diversity_for_c.append(np.array(federated_run_pipeline.gradient_diversity).reshape(1,-1))
         elif pfedme: 
             self.pfedme_test_metrics = fed_test_metrics 
+            save_model = federated_run_pipeline.best_model
+            torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_pfedme_{self.c}.pth')
             self.saveLosses('pfedme', federated_run_pipeline)
         return 
     
@@ -187,6 +196,8 @@ class ModelPipeline:
             epoch +=1
         ditto_test_metrics = ditto_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
         self.ditto_test_metrics = ditto_test_metrics
+        save_model = ditto_run_pipeline.best_model
+        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_ditto_{self.c}.pth')
         self.saveLosses('ditto', ditto_run_pipeline)
         return
 
@@ -199,13 +210,17 @@ class ModelPipeline:
         for _ in range(self.RUNS):
             metrics_run = self.runModels()
             metrics_for_c = pd.concat([metrics_for_c, metrics_run], axis=0)
+
         
+        '''
         gradient_diversity = np.full((self.RUNS, self.EPOCHS), np.nan)
         for i, arr in enumerate(self.gradient_diversity_for_c):
             arr = arr.reshape(-1)
             gradient_diversity[i, :len(arr)] = arr
+        '''
 
-        return self.c, self.losses_for_c, metrics_for_c, gradient_diversity
+
+        return self.c, self.losses_for_c, metrics_for_c
 
 
 def loss_dictionary_to_dataframe(losses, costs, RUNS):

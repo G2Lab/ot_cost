@@ -32,7 +32,7 @@ class OTCost:
             part_X1 = self.data['1'][index_1]
             part_X2 = self.data['2'][index_2]
             vector_dim = part_X1.shape[1]
-            if vector_dim > 5000:
+            if vector_dim > 1000:
                 part_X1, part_X2 = compress_vector((-1,1), part_X1, part_X2)
             part_X1, part_X2 = self.normalize_data(part_X1, part_X2)
             feature_cost = (1 - np.dot(part_X1, part_X2.T))

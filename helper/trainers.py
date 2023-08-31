@@ -6,6 +6,7 @@ from sklearn import metrics
 import numpy as np
 import warnings
 from collections import OrderedDict
+from itertools import cycle, islice
 # Suppress the specific LR warning that is non-issue
 warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overridden after learning rate scheduler initialization.")
 
@@ -78,13 +79,11 @@ class ModelTrainer:
             self.best_model = copy.deepcopy(self.model)
             self.early_stopping_counter = 0
 
-        elif len(self.val_losses) >= 10 and val_loss > np.mean(self.val_losses[-5:]):
+        elif len(self.val_losses) >= 10 and val_loss > self.best_loss + 5e-2:
                 self.early_stopping_counter += 1
                 if self.early_stopping_counter >= self.patience:
                     print("Early stopping")
                     self.stopping = True
-        else:
-            self.early_stopping_counter = 0
             
 
     def test(self, dataloader, metric_name):
@@ -165,13 +164,11 @@ class TransferModelTrainer(ModelTrainer):
             self.best_loss = combined_val_loss
             self.best_model = copy.deepcopy(self.model)
             self.early_stopping_counter = 0
-        elif len(self.val_losses) >= 10 and combined_val_loss > np.mean(self.val_losses[-5:] + self.val_loss_source[-5:]):
+        elif len(self.val_losses) >= 10 and combined_val_loss > self.best_loss + 5e-2:
             self.early_stopping_counter += 1
             if self.early_stopping_counter >= self.patience:
                 print("Early stopping")
                 self.stopping = True
-        else:
-            self.early_stopping_counter = 0
 
 
     def train(self, dataloader_target, dataloader_source):
@@ -184,31 +181,33 @@ class TransferModelTrainer(ModelTrainer):
     def _process_dataloader(self, dataloader_target, dataloader_source, validate=False):
         target_loss = 0
         source_loss = 0
-        # Process target dataloader
-        for x, y in dataloader_target:
-            x, y = to_device(x, self.device), to_device(y, self.device)
-            loss = self._step_transfer(x, y, validate, target=True)
-            target_loss += loss.item()
+        #Needed as dataset sizes may differ causing issues when zipping. This allows looping again over the smaller dataset.
+        iter_target = cycle(dataloader_target)
+        iter_source = cycle(dataloader_source)
+        max_iter = max(len(dataloader_target), len(dataloader_source))
 
-        # Process source dataloader
-        for x, y in dataloader_source:
-            x, y = to_device(x, self.device), to_device(y, self.device)
-            loss = self._step_transfer(x, y, validate, target=False)
-            source_loss += loss.item()
+        for t, s in islice(zip(iter_target, iter_source), max_iter):
+            x_t, y_t = t
+            x_s, y_s = s
+            x_t, y_t = to_device(x_t, self.device), to_device(y_t, self.device)
+            x_s, y_s = to_device(x_s, self.device), to_device(y_s, self.device)
+            loss_t, loss_s = self._step_transfer(x_t, y_t, x_s, y_s, validate)
+            target_loss += loss_t.item()
+            source_loss += loss_s.item()
         return target_loss / len(dataloader_target), source_loss / len(dataloader_source)
 
-    def _step_transfer(self, x, y, validate, target):
-        outputs = self.model(x.float())
-        loss = self._compute_loss(outputs, y)
-        if not target:
-            loss = loss * self.lam
+    def _step_transfer(self, x_t, y_t, x_s, y_s, validate):
+        outputs_t = self.model(x_t.float())
+        outputs_s = self.model(x_s.float())
+        loss_t = self._compute_loss(outputs_t, y_t)
+        loss_s = self._compute_loss(outputs_s, y_s) * self.lam
+        loss = loss_t + loss_s
         if not validate:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            if target:
-                self.lr_scheduler.step()
-        return loss
+            self.lr_scheduler.step()
+        return loss_t, loss_s
 
 
 
@@ -235,18 +234,19 @@ class FederatedModelTrainer(ModelTrainer):
         return model_clone, criterion_clone, optimizer_clone, lr_scheduler_clone
 
     def fit(self, data_loader_1, data_loader_2, val_data_loader_1, val_data_loader_2):
-        self.model_1.train()
-        self.model_2.train()
         for i in range(FED_EPOCH):
+            self._train_site(data_loader_1, 1)
+            self._train_site(data_loader_2, 2)
             if i == FED_EPOCH - 1:
                 self.save = True
             else:
                 self.save = False
-            self._train_site(data_loader_1, 1)
-            self._train_site(data_loader_2, 2)
+            '''
             if (not self.pfedme) & (not self.ditto):
                 grad_div = self._calculate_gradient_diversity()
                 self.gradient_diversity.append(grad_div)
+            '''
+
         
         self._fed_avg()
 
@@ -258,18 +258,17 @@ class FederatedModelTrainer(ModelTrainer):
             self.best_loss = val_loss
             self.best_model = copy.deepcopy(self.model_1)
             self.early_stopping_counter = 0
-        elif len(self.val_losses) >= 10 and val_loss > np.mean(self.val_losses[-5:]):
+        elif len(self.val_losses) >= 10 and val_loss > self.best_loss+ 5e-2:
             self.early_stopping_counter += 1
             if self.early_stopping_counter >= self.patience:
                 print("Early stopping")
                 self.stopping = True
-        else:
-            self.early_stopping_counter = 0
 
 
     def _train_site(self, data_loader, site_number):
         model_site, criterion_site, optimizer_site, lr_scheduler_site   = self._get_site_objects(site_number)
         train_loss = 0
+        model_site.train()
         for x, y in data_loader:
             x, y = to_device(x, self.device), to_device(y, self.device)
             loss = self._compute_loss_fed(model_site, criterion_site, x, y)
@@ -303,11 +302,13 @@ class FederatedModelTrainer(ModelTrainer):
             self.model_2.load_state_dict(self.model.state_dict())
     
     def _calculate_gradient_diversity(self):
+        model_1 = self.model_1
+        model_2 = self.model_2
         grads = {'model_1': {}, 'model_2': {}}
-        for name, param in self.model_1.named_parameters():
+        for name, param in model_1.named_parameters():
                 grads['model_1'][name] = param.grad.clone().detach()
 
-        for name, param in self.model_2.named_parameters():
+        for name, param in model_2.named_parameters():
                 grads['model_2'][name] = param.grad.clone().detach()
 
         model_1_w = torch.cat([w.flatten() for w in grads['model_1'].values()])
@@ -343,9 +344,9 @@ class FederatedModelTrainer(ModelTrainer):
         
         val_loss_1 /= len(dataloader_1)
         val_loss_2 /= len(dataloader_2)
-        combined_val_loss = self.weight_1 * val_loss_1 + self.weight_2 * val_loss_2
+        #combined_val_loss = self.weight_1 * val_loss_1 + self.weight_2 * val_loss_2
         
-        return combined_val_loss
+        return val_loss_1 #combined_val_loss
 
     def _get_site_objects(self, site_number):
         return (self.model_1, self.criterion_1, self.optimizer_1, self.lr_scheduler_1) if site_number == 1 else (self.model_2, self.criterion_2, self.optimizer_2, self.lr_scheduler_2)
@@ -529,7 +530,4 @@ def get_dice_score(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9)
     num = 2 * tp
     denom = 2 * tp + fp + fn + epsilon
     dice_score = num / denom
-    return dice_score.mean()
-
-def get_dice_loss(output, target):
-    return 1 - get_dice_score(output, target)
+    return dice_score

@@ -17,9 +17,9 @@ import pickle
 from torch.optim.lr_scheduler import ExponentialLR
 from multiprocessing import Pool
 
-EPOCHS = 200
+EPOCHS = 100
 BATCH_SIZE = 5000
-RUNS = 10
+RUNS = 5
 DATASET = 'EMNIST'
 METRIC_TEST = 'Accuracy'
 LEARNING_RATE = 5e-3
@@ -78,7 +78,7 @@ def loadData(dataset, cost):
     ##get X and label
     X = data['data']
     y = data['labels']
-    class_size = 30
+    class_size = 100
     ind = sample_per_class(y, class_size)
     X_sample =  X[ind]
     y_sample = y[ind]

@@ -20,10 +20,10 @@ from multiprocessing import Pool
 
 EPOCHS = 100
 BATCH_SIZE = 256
-RUNS = 5
+RUNS = 3
 DATASET = 'CIFAR'
 METRIC_TEST = 'Accuracy'
-LEARNING_RATE = 5e-2
+LEARNING_RATE = 5e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CustomResNet18(nn.Module):
@@ -59,7 +59,7 @@ def createModel():
     return model, criterion, optimizer, lr_scheduler
 
 
-def sample_per_class(labels, class_size = 50):
+def sample_per_class(labels, class_size = 120):
   df = pd.DataFrame({'labels': labels})
   df_stratified = df.groupby('labels').apply(lambda x: x.sample(class_size, replace=False))
   ind = df_stratified.index.get_level_values(1)
@@ -75,7 +75,7 @@ def loadData(dataset, cost):
     ##get X and label
     X = data['data']
     y = data['labels']
-    class_size = 50
+    class_size = 120
     ind = sample_per_class(y, class_size)
     X_sample =  X[ind]
     y_sample = y[ind]

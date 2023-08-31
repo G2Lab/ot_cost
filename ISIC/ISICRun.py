@@ -22,13 +22,14 @@ import pickle
 from multiprocessing import Pool
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR
+from torch.nn.modules.loss import _Loss
 
-EPOCHS = 1000
-BATCH_SIZE = 512
-RUNS = 2
+EPOCHS = 100
+BATCH_SIZE = 64
+RUNS = 1
 DATASET = 'ISIC'
 METRIC_TEST = 'Balanced_accuracy'
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 5e-4
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -36,11 +37,8 @@ class efficientnetClassifier(nn.Module):
     def __init__(self):
         super(efficientnetClassifier, self).__init__()
         self.efficientnet = torch.hub.load('NVIDIA/DeepLearningExamples:torchhub', 'nvidia_efficientnet_b0', pretrained=True)
-        for name, param in self.efficientnet.named_parameters():
-            if 'features' in name or 'classifier' in name:
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
+        for _, param in self.efficientnet.named_parameters():
+            param.requires_grad = True
         self.efficientnet.classifier.fc = nn.Linear(1280, 8)
 
     def forward(self, x):
@@ -59,16 +57,35 @@ class efficientnetClassifier(nn.Module):
 class WeightedFocalLoss(nn.Module):
     def __init__(self):
         super(WeightedFocalLoss, self).__init__()
-        self.alpha = 1
-        self.gamma = 2
+        self.alpha = torch.tensor([1, 2, 1, 1, 5, 1, 1, 1]).to(torch.float).to(DEVICE)
+        self.gamma = 2.0
 
     def forward(self, inputs, targets):
         targets_one_hot = F.one_hot(targets, num_classes=inputs.size(1)).float()
         ce_loss = F.cross_entropy(inputs, targets_one_hot, reduction='none')
         probs = F.softmax(inputs, dim=1)
         focal_weights = (1 - probs) ** self.gamma
-        weighted_focal_loss = self.alpha * focal_weights * ce_loss.unsqueeze(1)
+        at = self.alpha.gather(0, targets.long())
+        weighted_focal_loss = at * focal_weights * ce_loss.unsqueeze(1)
         return torch.mean(weighted_focal_loss)
+    
+class WeightedFocalLoss(_Loss):
+    def __init__(self, alpha=torch.tensor([1, 2, 1, 1, 5, 1, 1, 1]), gamma=2.0):
+        super(WeightedFocalLoss, self).__init__()
+        self.alpha = alpha.to(torch.float)
+        self.gamma = gamma
+
+    def forward(self, inputs, targets):
+        targets = targets.view(-1, 1).type_as(inputs)
+        logpt = F.log_softmax(inputs, dim=1)
+        logpt = logpt.gather(1, targets.long())
+        logpt = logpt.view(-1)
+        pt = logpt.exp()
+        self.alpha = self.alpha.to(targets.device)
+        at = self.alpha.gather(0, targets.data.view(-1).long())
+        logpt = logpt * at
+        loss = -1 * (1 - pt) ** self.gamma * logpt
+        return loss.mean()
 
 def createModel():
     model = efficientnetClassifier()
@@ -137,8 +154,8 @@ def main():
 
 
     ##Process results and graph
-    save = True
-    pr.process_results(DATASET, METRIC_TEST, costs, save)
+    #save = True
+    #pr.process_results(DATASET, METRIC_TEST, costs, save)
 
 if __name__ == '__main__':
     main()

@@ -92,7 +92,7 @@ def process_results(DATASET, metric, costs, save = False):
     process_result(DATASET, metric, costs, save)
     process_result(DATASET, 'losses', costs, save)
     grapher_losses(DATASET, costs, save)
-    grapher_grad_div(DATASET, costs, save)
+    #grapher_grad_div(DATASET, costs, save)
     return
 
 def grapher_losses(DATASET, costs, save):

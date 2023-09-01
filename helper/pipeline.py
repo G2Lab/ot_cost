@@ -13,6 +13,7 @@ import importlib
 importlib.reload(dp)
 importlib.reload(tr)
 import warnings
+import pickle
 # Suppress the specific LR warning that is non-issue
 warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overridden after learning rate scheduler initialization.")
 
@@ -67,12 +68,15 @@ class ModelPipeline:
         X1, y1, X2, y2 = self.load()
         self.single(X1, y1)
         self.joint(X1, y1, X2, y2)
-        self.transfer(X1, y1, X2, y2)
-        self.federated(X1, y1, X2, y2)
-        self.federated(X1, y1, X2, y2, pfedme = True)
+        #self.transfer(X1, y1, X2, y2)
+        #self.federated(X1, y1, X2, y2)
+        #self.federated(X1, y1, X2, y2, pfedme = True)
         #self.maml(X1, y1, X2, y2)
-        self.ditto(X1, y1, X2, y2)
-        metrics = [self.single_test_metrics, self.joint_test_metrics, self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
+        #self.ditto(X1, y1, X2, y2)
+        metrics = [self.single_test_metrics, self.joint_test_metrics]# ,self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
+        with open(f'{ROOT_DIR}/results/IXITiny/results_{self.c}.pkl', 'wb') as f:
+            pickle.dump(metrics, f)
+
         metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T
         metrics_df['cost'] = self.c
         return metrics_df

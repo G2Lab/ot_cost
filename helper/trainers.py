@@ -530,4 +530,4 @@ def get_dice_score(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9)
     num = 2 * tp
     denom = 2 * tp + fp + fn + epsilon
     dice_score = num / denom
-    return dice_score
+    return dice_score.mean().item()

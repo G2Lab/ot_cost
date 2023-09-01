@@ -25,7 +25,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn.modules.loss import _Loss
 
 EPOCHS = 100
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 RUNS = 1
 DATASET = 'ISIC'
 METRIC_TEST = 'Balanced_accuracy'
@@ -54,21 +54,6 @@ class efficientnetClassifier(nn.Module):
         if self.features.bias is not None:
             nn.init.constant_(self.features.bias.data, 0)
 
-class WeightedFocalLoss(nn.Module):
-    def __init__(self):
-        super(WeightedFocalLoss, self).__init__()
-        self.alpha = torch.tensor([1, 2, 1, 1, 5, 1, 1, 1]).to(torch.float).to(DEVICE)
-        self.gamma = 2.0
-
-    def forward(self, inputs, targets):
-        targets_one_hot = F.one_hot(targets, num_classes=inputs.size(1)).float()
-        ce_loss = F.cross_entropy(inputs, targets_one_hot, reduction='none')
-        probs = F.softmax(inputs, dim=1)
-        focal_weights = (1 - probs) ** self.gamma
-        at = self.alpha.gather(0, targets.long())
-        weighted_focal_loss = at * focal_weights * ce_loss.unsqueeze(1)
-        return torch.mean(weighted_focal_loss)
-    
 class WeightedFocalLoss(_Loss):
     def __init__(self, alpha=torch.tensor([1, 2, 1, 1, 5, 1, 1, 1]), gamma=2.0):
         super(WeightedFocalLoss, self).__init__()
@@ -96,9 +81,9 @@ def createModel():
     return model, criterion, optimizer, lr_scheduler
 
 def loadData(dataset, cost):
-    dataset_pairings = {0.08: (0,0), 0.15:(0,2), 0.17:(2,5), 0.21:(3,5), 0.25:(1,2), 0.28:(1,4), 0.3:(1,3)}
+    dataset_pairings = {0.06: (2,2), 0.15:(2,0), 0.19:(2,3), 0.25:(2,1), 0.3:(1,3)}
     site = dataset_pairings[cost][dataset-1]
-    files = pd.read_csv(f'{ROOT_DIR}/data/ISIC/site_{site}_files_used.csv')
+    files = pd.read_csv(f'{ROOT_DIR}/data/ISIC/site_{site}_files_used.csv', nrows = 2000)
     image_files = [f'{ROOT_DIR}/data/ISIC/ISIC_2019_Training_Input_preprocessed/{file}.jpg' for file in files['image']]
     labels = files['label'].values
     return np.array(image_files), labels
@@ -125,7 +110,7 @@ def run_model_for_cost(inputs):
 def main():
      ##run model on datasets
     cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
-    costs = [0.08, 0.15, 0.3]
+    costs = [0.06, 0.15, 0.19, 0.25, 0.3]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     results = []
     if DEVICE == 'cpu':

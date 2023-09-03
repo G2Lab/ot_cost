@@ -68,15 +68,12 @@ class ModelPipeline:
         X1, y1, X2, y2 = self.load()
         self.single(X1, y1)
         self.joint(X1, y1, X2, y2)
-        #self.transfer(X1, y1, X2, y2)
-        #self.federated(X1, y1, X2, y2)
-        #self.federated(X1, y1, X2, y2, pfedme = True)
+        self.transfer(X1, y1, X2, y2)
+        self.federated(X1, y1, X2, y2)
+        self.federated(X1, y1, X2, y2, pfedme = True)
         #self.maml(X1, y1, X2, y2)
-        #self.ditto(X1, y1, X2, y2)
-        metrics = [self.single_test_metrics, self.joint_test_metrics]# ,self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
-        with open(f'{ROOT_DIR}/results/IXITiny/results_{self.c}.pkl', 'wb') as f:
-            pickle.dump(metrics, f)
-
+        self.ditto(X1, y1, X2, y2)
+        metrics = [self.single_test_metrics, self.joint_test_metrics ,self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
         metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T
         metrics_df['cost'] = self.c
         return metrics_df

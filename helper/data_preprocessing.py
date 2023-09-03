@@ -36,6 +36,7 @@ class TabularDatasetHandler(AbstractDatasetHandler):
         super().__init__(dataset_name)
         self.scaler = StandardScaler()
         self.scaler_label = StandardScaler()
+    
     def preprocess_data(self, dataloader, fit_transform = False):
         X, y = dataloader
         if fit_transform:
@@ -148,33 +149,31 @@ class DataPreprocessor:
 
     def preprocess(self, X, y):
         train_data, val_data, test_data = self.split(X, y) 
-        train_data = self.handler.preprocess_data(train_data, fit_transform= True)
-        val_data = self.handler.preprocess_data(val_data, fit_transform= False)
-        test_data = self.handler.preprocess_data(test_data, fit_transform= False)
         return self.create_dataloaders(train_data, val_data, test_data)
     
     def preprocess_joint(self, X1, y1, X2, y2):
         train_data, val_data, test_data = self.split_joint(X1, y1, X2, y2) 
-        train_data = self.handler.preprocess_data(train_data, fit_transform= True)
-        val_data = self.handler.preprocess_data(val_data, fit_transform= False)
-        test_data = self.handler.preprocess_data(test_data, fit_transform= False)
         return self.create_dataloaders(train_data, val_data, test_data)
-    
+
     def split(self, X, y, test_size=0.2, val_size = 0.2):
         X_train_temp, X_test, y_train_temp, y_test = train_test_split(X, y, test_size = test_size, random_state=np.random.RandomState(42))
         X_train, X_val, y_train, y_val = train_test_split(X_train_temp, y_train_temp, test_size = val_size, random_state=np.random.RandomState(42))
         return (X_train, y_train), (X_val, y_val), (X_test, y_test)
     
-    def split_joint(self, X1, y1, X2, y2, test_size=0.2, val_size = 0.2):
-        X_train_temp_1, X_test, y_train_temp_1, y_test = train_test_split(X1, y1, test_size = test_size, random_state=np.random.RandomState(42))
-        X_train_temp_2, _, y_train_temp_2, _ = train_test_split(X2, y2, test_size = test_size, random_state=np.random.RandomState(42))
-        X_train_temp = np.concatenate((X_train_temp_1, X_train_temp_2), axis = 0)
-        y_train_temp = np.concatenate((y_train_temp_1, y_train_temp_2), axis = 0)
-        X_train, X_val, y_train, y_val = train_test_split(X_train_temp, y_train_temp, test_size = val_size, random_state=np.random.RandomState(42))
+    def split_joint(self, X1, y1, X2, y2):
+        (X_train1, y_train1), (X_val1, y_val1), (X_test, y_test)= self.split(X1, y1)
+        (X_train2, y_train2), (X_val2, y_val2), (_, _) = self.split(X2, y2)
+        X_train = np.concatenate((X_train1, X_train2), axis = 0)
+        y_train = np.concatenate((y_train1, y_train2), axis = 0)
+        X_val = np.concatenate((X_val1, X_val2), axis = 0)
+        y_val = np.concatenate((y_val1, y_val2), axis = 0)
         return (X_train, y_train), (X_val, y_val), (X_test, y_test)
-    
+
     def create_dataloaders(self, train_data, val_data, test_data):
+        train_data = self.handler.preprocess_data(train_data, fit_transform= True)
+        val_data = self.handler.preprocess_data(val_data, fit_transform= False)
+        test_data = self.handler.preprocess_data(test_data, fit_transform= False)
         train_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
-        val_loader = DataLoader(val_data, batch_size=self.batch_size)
-        test_loader = DataLoader(test_data, batch_size=self.batch_size)
+        val_loader = DataLoader(val_data, batch_size=self.batch_size, shuffle = False)
+        test_loader = DataLoader(test_data, batch_size=self.batch_size, shuffle = False)
         return train_loader, val_loader, test_loader

@@ -85,7 +85,7 @@ def run_model_for_cost(inputs):
 def main():
      ##run model on datasets
     cpu = int(os.environ.get('SLURM_CPUS_PER_TASK', 5))
-    costs = [0.12, 0.23, 0.30, 0.41]
+    costs = [0.12, 0.23, 0.30, 0.40]
     inputs = [(c, loadData, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS) for c in costs]
     with Pool(cpu) as pool:
         results = pool.map(run_model_for_cost, inputs)

@@ -2,261 +2,309 @@ global ROOT_DIR
 ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 
 import pandas as pd
+import sys
+import os
+import numpy as np
 import torch
 import torch.nn as nn
-import sys
-import numpy as np
 sys.path.append(f'{ROOT_DIR}/code/helper')
 import data_preprocessing as dp
 import trainers as tr
+import models_helper as mh
+import torch.nn.functional as F
+from torch.optim.lr_scheduler import ExponentialLR, LambdaLR
 import importlib
+import pickle
 importlib.reload(dp)
 importlib.reload(tr)
-import warnings
-import pickle
-# Suppress the specific LR warning that is non-issue
-warnings.filterwarnings("ignore", "Seems like `optimizer.step()` has been overridden after learning rate scheduler initialization.")
+importlib.reload(mh)
 
-
-global DEVICE
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'ditto']
+TABULAR = ['Synthetic', 'Credit', 'Weather']
+CLASS_ADJUST = ['EMNIST', 'CIFAR'] # as each dataset cost has different labels
+     
+def loadData(DATASET, DATA_DIR, data_num, cost):
+    if DATASET in TABULAR:
+        if DATASET == 'Synthetic':
+            ##load data
+            X = pd.read_csv(f'{DATA_DIR}/data_{data_num}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(13)])
+            X = X.sample(300)
+        elif DATASET == 'Credit':
+            X = pd.read_csv(f'{DATA_DIR}/data_{data_num}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(29)])
+            X = X.sample(300)
+        elif DATASET == 'Weather':
+            X = pd.read_csv(f'{DATA_DIR}/data_{data_num}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(124)])
+            X = X.sample(n=500)
+        y = X.iloc[:,-1]
+        X = X.iloc[:,:-1]
+        return X.values, y.values
+    elif DATASET in CLASS_ADJUST:
+        ##load data
+        data = np.load(f'{DATA_DIR}/data_{data_num}_{cost:.2f}.npz')
+        ##get X and label
+        X = data['data']
+        y = data['labels']
+        class_size = 100
+        ind = sample_per_class(y, class_size)
+        X_sample =  X[ind]
+        y_sample = y[ind]
+        unique_labels = np.unique(y_sample)
+        mapping = {label: idx for idx, label in enumerate(unique_labels)}
+        y_sample_mapped = np.vectorize(mapping.get)(y_sample)
 
-class ModelPipeline:
-    def __init__(self, c, loadDataFunc, DATASET, METRIC_TEST, BATCH_SIZE, EPOCHS, DEVICE, RUNS):
-        self.ARCHITECTURES = ['single', 'joint', 'transfer', 'federated', 'pfedme', 'ditto']
-        self.CATEGORICAL_CLASSES = ['EMNIST', 'CIFAR']
-        self.c = c
-        self.loadDataFunc = loadDataFunc
-        self.RUNS = RUNS
-        self.DATASET = DATASET
-        self.METRIC_TEST = METRIC_TEST
-        self.BATCH_SIZE = BATCH_SIZE
-        self.EPOCHS = EPOCHS
-        self.DEVICE = DEVICE
-        self.SINGLE = False
-        self.SINGLE_CLASS = None
-        self.MSL_CLASS = None
-        self.gradient_diversity_for_c = []
+        return X_sample, y_sample_mapped
+    elif DATASET == 'IXITiny':
+        sites = {0.08: [['Guys'], ['HH']],
+             0.28: [['IOP'], ['Guys']],
+             0.30: [['IOP'], ['HH']]}
+        site_names = sites[cost][data_num-1]
 
-        _, y1 = self.loadDataFunc(1, self.c)
-        _, y2 = self.loadDataFunc(2, self.c)
-        if self.DATASET in self.CATEGORICAL_CLASSES:
-            y1, y2 = self.remap_categoricals(y1, y2)
-            self.SINGLE_CLASS = len(set(list(y1)))
-            self.MSL_CLASS = len(set(list(y1) + list(y2)))
+        image_dir = os.path.join(DATA_DIR, 'flamby/image')
+        label_dir = os.path.join(DATA_DIR, 'flamby/label')
+        image_files = []
+        label_files = []
+        for name in site_names:
+                image_files.extend([f'{image_dir}/{file}' for file in os.listdir(image_dir) if name in file])
+                label_files.extend([f'{label_dir}/{file}'  for file in os.listdir(label_dir) if name in file])
+        image_files, label_files = align_image_label_files(image_files, label_files)
+        return np.array(image_files), np.array(label_files)
+    elif DATASET == 'ISIC':
+        dataset_pairings = {0.06: (2,2), 0.15:(2,0), 0.19:(2,3), 0.25:(2,1), 0.3:(1,3)}
+        site = dataset_pairings[cost][data_num-1]
+        files = pd.read_csv(f'{DATA_DIR}/site_{site}_files_used.csv', nrows = 2000)
+        image_files = [f'{DATA_DIR}/ISIC_2019_Training_Input_preprocessed/{file}.jpg' for file in files['image']]
+        labels = files['label'].values
+        return np.array(image_files), labels
 
-    def load(self):
-        X1, y1 = self.loadDataFunc(1, self.c)
-        X2, y2 = self.loadDataFunc(2, self.c)
-        if self.DATASET in self.CATEGORICAL_CLASSES:
-            y1, y2 = self.remap_categoricals(y1, y2)
-            self.SINGLE_CLASS = len(set(list(y1)))
-            self.MSL_CLASS = len(set(list(y1) + list(y2)))
-        return X1, y1, X2, y2
+#FOR EMNIST AND CIFAR
+def sample_per_class(labels, class_size = 500):
+  df = pd.DataFrame({'labels': labels})
+  df_stratified = df.groupby('labels').apply(lambda x: x.sample(class_size, replace=False))
+  ind = df_stratified.index.get_level_values(1)
+  return ind
 
-    def set_functions(self, createModelFunc):
-        self.createModelFunc = createModelFunc
+#FOR ISIC AND IXITiny
+def get_common_name(full_path):
+    return os.path.basename(full_path).split('_')[0]
 
-    def saveLosses(self, train_type, pipeline):
-        self.losses_for_c[train_type]['train_losses'].append(pipeline.train_losses)
-        self.losses_for_c[train_type]['val_losses'].append(pipeline.val_losses)
-        self.losses_for_c[train_type]['test_losses'].append(pipeline.test_losses)
-        return 
+def align_image_label_files(image_files, label_files):
+    labels_dict = {get_common_name(path): path for path in label_files}
+    images_dict = {get_common_name(path): path for path in image_files}
+    common_keys = sorted(set(labels_dict.keys()) & set(images_dict.keys()))
+    sorted_labels = [labels_dict[key] for key in common_keys]
+    sorted_images = [images_dict[key] for key in common_keys]
+    return sorted_images, sorted_labels
 
-    def runModels(self):
-        X1, y1, X2, y2 = self.load()
-        self.single(X1, y1)
-        self.joint(X1, y1, X2, y2)
-        self.transfer(X1, y1, X2, y2)
-        self.federated(X1, y1, X2, y2)
-        self.federated(X1, y1, X2, y2, pfedme = True)
-        #self.maml(X1, y1, X2, y2)
-        self.ditto(X1, y1, X2, y2)
-        metrics = [self.single_test_metrics, self.joint_test_metrics ,self.transfer_test_metrics, self.fedavg_test_metrics, self.pfedme_test_metrics, self.ditto_test_metrics]
-        metrics_df = pd.DataFrame(metrics, index=ARCHITECTURES).T
-        metrics_df['cost'] = self.c
-        return metrics_df
-        
-    def remap_categoricals(self, y1, y2):
-        unique_y1 = sorted(set(y1))
-        mapping = {label: idx for idx, label in enumerate(unique_y1)}
-        X = len(unique_y1)
-        unique_y2 = sorted(set(y2) - set(unique_y1))
-        mapping.update({label: X + idx for idx, label in enumerate(unique_y2)})
-        y1_mapped = np.array([mapping[label] for label in y1])
-        y2_mapped = np.array([mapping[label] for label in y2])
-        return y1_mapped, y2_mapped
+def set_parameters_for_dataset(DATASET):
+    if DATASET == 'Synthetic':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'  
+        EPOCHS = 300
+        WARMUP_STEPS = EPOCHS // 15
+        BATCH_SIZE = 2000
+        RUNS = 100
+        DATASET = 'Synthetic'
+        METRIC_TEST = 'F1'
+
+    elif DATASET == 'Credit':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
+        EPOCHS = 300
+        WARMUP_STEPS = EPOCHS // 15 
+        BATCH_SIZE = 2000
+        RUNS = 100
+        DATASET = 'Credit'
+        METRIC_TEST = 'F1'
+
+    elif DATASET == 'Weather':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
+        EPOCHS = 300
+        WARMUP_STEPS = EPOCHS // 15 
+        BATCH_SIZE = 4000
+        RUNS = 5
+        METRIC_TEST = 'R2'
+
+    elif DATASET == 'EMNIST':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
+        EPOCHS = 500
+        WARMUP_STEPS = EPOCHS // 15
+        BATCH_SIZE = 5000
+        RUNS = 10
+        METRIC_TEST = 'Accuracy'
+
+    elif DATASET == 'CIFAR':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
+        EPOCHS = 500
+        WARMUP_STEPS = EPOCHS // 15
+        BATCH_SIZE = 256
+        RUNS = 10
+        METRIC_TEST = 'Accuracy'
+
+    elif DATASET == 'IXITiny':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}' 
+        EPOCHS = 100
+        WARMUP_STEPS = EPOCHS // 15
+        BATCH_SIZE = 12
+        RUNS = 5
+        METRIC_TEST = 'DICE'
     
+    elif DATASET == 'ISIC':
+        DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
+        EPOCHS = 500
+        WARMUP_STEPS = EPOCHS // 15
+        BATCH_SIZE = 32
+        RUNS = 3
+        METRIC_TEST = 'Balanced_accuracy'
+    return DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST
 
-    def single(self, X1, y1):
-        self.SINGLE = True
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
-        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader, val_loader, test_loader = dataloader.preprocess(X1, y1)
-        run_pipeline = tr.ModelTrainer(self.DATASET, model, optimizer, criterion, lr_scheduler, DEVICE)
-        
-        epoch = 0
-        while (not run_pipeline.stopping) & (epoch < self.EPOCHS):
-            run_pipeline.fit(train_loader, val_loader)
-            epoch += 1
-
-        self.single_test_metrics = run_pipeline.test(test_loader, metric_name=self.METRIC_TEST)
-        save_model = run_pipeline.best_model
-        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_single_{self.c}.pth')
-        self.saveLosses('single', run_pipeline)
-        return 
-
-    def joint(self, X1, y1, X2, y2):
-        self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
-        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader, val_loader, test_loader = dataloader.preprocess_joint(X1, y1, X2, y2)
-        run_pipeline = tr.ModelTrainer(self.DATASET, model, optimizer, criterion, lr_scheduler, self.DEVICE)
-
-        epoch = 0
-        while (not run_pipeline.stopping) & (epoch < self.EPOCHS):
-            run_pipeline.fit(train_loader, val_loader)
-            epoch += 1
-        self.joint_test_metrics = run_pipeline.test(test_loader, metric_name=self.METRIC_TEST)
-        save_model = run_pipeline.best_model
-        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_joint_{self.c}.pth')
-        self.saveLosses('joint', run_pipeline)
-        return
-
-    def transfer(self, X1, y1, X2, y2):
-        self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
-        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader_target, val_loader_target, test_loader_target = dataloader.preprocess(X1, y1)
-        train_loader_source, val_loader_source, _ = dataloader.preprocess(X2, y2)
-        transfer_run_pipeline = tr.TransferModelTrainer(self.DATASET, model, optimizer, criterion, lr_scheduler, self.DEVICE)
-        
-        epoch = 0
-        while (not transfer_run_pipeline.stopping) & (epoch < self.EPOCHS):
-            transfer_run_pipeline.fit(train_loader_target, train_loader_source, val_loader_target, val_loader_source)
-            epoch +=1
-        self.transfer_test_metrics = transfer_run_pipeline.test(test_loader_target, metric_name=self.METRIC_TEST)
-        save_model = transfer_run_pipeline.best_model
-        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_transfer_{self.c}.pth')
-        self.saveLosses('transfer', transfer_run_pipeline)
-        return 
-
-    def federated(self, X1, y1, X2, y2, pfedme=False, pfedme_reg=1e-1):
-        self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
-        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
-        train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
-        federated_run_pipeline = tr.FederatedModelTrainer(self.DATASET, model, optimizer, criterion,lr_scheduler, self.DEVICE, train_loader_1, train_loader_2, pfedme, pfedme_reg)
-
-        epoch = 0
-        while (not federated_run_pipeline.stopping) & (epoch < self.EPOCHS // tr.FED_EPOCH):
-            federated_run_pipeline.fit(train_loader_1, train_loader_2, val_loader_1, val_loader_2)
-            epoch +=1
-        fed_test_metrics = federated_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
-        if not pfedme:
-            self.fedavg_test_metrics = fed_test_metrics
-            save_model = federated_run_pipeline.best_model
-            torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_fed_{self.c}.pth')
-            self.saveLosses('federated', federated_run_pipeline)
-            #self.gradient_diversity_for_c.append(np.array(federated_run_pipeline.gradient_diversity).reshape(1,-1))
-        elif pfedme: 
-            self.pfedme_test_metrics = fed_test_metrics 
-            save_model = federated_run_pipeline.best_model
-            torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_pfedme_{self.c}.pth')
-            self.saveLosses('pfedme', federated_run_pipeline)
-        return 
+def createModel(DATASET, architecture, c, WARMUP_STEPS):
+    if DATASET == 'Synthetic':
+        LR_dict = {'single': 1e-1, 'joint': 1e-1, 'federated': 1e-1, 'pfedme':1e-1, 'ditto':1e-1}
+        model = mh.Synthetic()
+        criterion = nn.BCELoss()
+    elif DATASET == 'Credit':
+        LR_dict = {'single': 5e-2, 'joint': 5e-2, 'federated': 5e-2, 'pfedme':5e-2, 'ditto':5e-2}
+        criterion = nn.BCELoss()
+    elif DATASET == 'Weather':
+        LR_dict = {'single': 5e-3, 'joint': 5e-3, 'federated': 5e-3, 'pfedme':5e-3, 'ditto':5e-3}
+        model = mh.Weather()
+        criterion = nn.MSELoss()
+    elif DATASET == 'EMNIST':
+        LR_dict = {'single': 5e-3, 'joint': 5e-3, 'federated': 5e-3, 'pfedme':5e-3, 'ditto':5e-3}
+        with open(f'{ROOT_DIR}/data/{DATASET}/CLASSES', 'rb') as f:
+            classes_used = pickle.load(f)
+            if architecture == 'single':
+                CLASSES = len(classes_used[c][0])
+            else:
+                CLASSES = len(set(classes_used[c][0] + classes_used[c][1]))
+        model = mh.EMNIST(CLASSES)
+    elif DATASET == 'CIFAR':
+        LR_dict = {'single': 5e-3, 'joint': 5e-3, 'federated': 5e-3, 'pfedme':5e-3, 'ditto':5e-3}
+        with open(f'{ROOT_DIR}/data/{DATASET}/CLASSES', 'rb') as f:
+            classes_used = pickle.load(f)
+            if architecture == 'single':
+                CLASSES = len(classes_used[c][0])
+            else:
+                CLASSES = len(set(classes_used[c][0] + classes_used[c][1]))
+        model = mh.EMNIST(CLASSES)
+        criterion = nn.CrossEntropyLoss()
+    elif DATASET == 'IXITiny':
+        LR_dict = {'single': 5e-3, 'joint': 5e-3, 'federated': 5e-3, 'pfedme':5e-3, 'ditto':5e-3}
+        model = mh.IXITiny()
+        criterion = get_dice_loss
+    elif DATASET == 'ISIC':
+        LR_dict = {'single': 5e-3, 'joint': 5e-3, 'federated': 5e-3, 'pfedme':5e-3, 'ditto':5e-3}
+        model = mh.ISIC()
+        criterion = nn.CrossEntropyLoss()
+    model.to(DEVICE)
     
-    def maml(self, X1, y1, X2, y2):
-        self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
-        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
-        train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
-        maml_run_pipeline = tr.MAMLModelTrainer(self.DATASET, model, optimizer, criterion,lr_scheduler, self.DEVICE, train_loader_1, train_loader_2)
-        epoch = 0
-        while (not maml_run_pipeline.stopping) & (epoch < self.EPOCHS // tr.FED_EPOCH):
-            maml_run_pipeline.fit(train_loader_1, train_loader_2, val_loader_1, val_loader_2)
-            epoch +=1
-        maml_test_metrics = maml_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
-        self.maml_test_metrics = maml_test_metrics
-        self.saveLosses('maml', maml_run_pipeline)
-        return
+    #Different optimizers for federated and non federated
+    if architecture in ['single', 'joint']:
+        LR = LR_dict[architecture]
+        optimizer = torch.optim.AdamW(model.parameters(), lr = LR, amsgrad = True, betas = (0.9, 0.999))
+    else:
+        LR = LR_dict[architecture]
+        optimizer = torch.optim.AdamW(model.parameters(), lr = LR, amsgrad = True, betas = (0.9, 0.999))
+    exp_scheduler = ExponentialLR(optimizer, gamma=0.9)
+    warmup_scheduler = LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, step / WARMUP_STEPS))
+    lr_scheduler = (warmup_scheduler, exp_scheduler)
+    
+    return model, criterion, optimizer, lr_scheduler
+          
+def get_dice_loss(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):
+    p0 = output
+    g0 = target
+    p1 = 1 - p0
+    g1 = 1 - g0
+    tp = (p0 * g0).sum(dim=SPATIAL_DIMENSIONS)
+    fp = (p0 * g1).sum(dim=SPATIAL_DIMENSIONS)
+    fn = (p1 * g0).sum(dim=SPATIAL_DIMENSIONS)
+    num = 2 * tp
+    denom = 2 * tp + fp + fn + epsilon
+    dice_score = num / denom
+    return torch.mean(1 - dice_score)
 
-    def ditto(self, X1, y1, X2, y2):
-        self.SINGLE = False
-        model, criterion, optimizer, lr_scheduler = self.createModelFunc()
-        dataloader = dp.DataPreprocessor(self.DATASET, self.BATCH_SIZE)
-        train_loader_1, val_loader_1, test_loader_1 = dataloader.preprocess(X1, y1)
-        train_loader_2, val_loader_2, _ = dataloader.preprocess(X2, y2)
-        ditto_run_pipeline = tr.DittoFederatedModelTrainer(self.DATASET, model, optimizer, criterion,lr_scheduler, self.DEVICE, train_loader_1, train_loader_2)
-        epoch = 0
-        while (not ditto_run_pipeline.stopping) & (epoch < self.EPOCHS // tr.FED_EPOCH):
-            ditto_run_pipeline.fit(train_loader_1, train_loader_2, val_loader_1, val_loader_2)
-            epoch +=1
-        ditto_test_metrics = ditto_run_pipeline.test(test_loader_1, metric_name=self.METRIC_TEST)
-        self.ditto_test_metrics = ditto_test_metrics
-        save_model = ditto_run_pipeline.best_model
-        torch.save(save_model.state_dict(), f'{ROOT_DIR}/data/{self.DATASET}/model_ditto_{self.c}.pth')
-        self.saveLosses('ditto', ditto_run_pipeline)
-        return
+def modelRuns(DATASET, c):
+    DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST = set_parameters_for_dataset(DATASET)
+    scores = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
+    test_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
+    val_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
+    train_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
+    X1, y1 = loadData(DATASET, DATA_DIR, 1, c)
+    X2, y2 = loadData(DATASET, DATA_DIR, 2, c)
 
+    for _ in range(RUNS):
+        #single
+        arch = 'single'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_1 = dataloader.preprocess(X1, y1)
+        trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+        trainer.set_loader(site_1)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
 
-    def run_model_for_cost(self):
-        self.losses_for_c = {}
-        for architecture in self.ARCHITECTURES:
-            self.losses_for_c[architecture] = {'train_losses': [], 'val_losses': [], 'test_losses': []}
-        metrics_for_c = pd.DataFrame()
-        for _ in range(self.RUNS):
-            metrics_run = self.runModels()
-            metrics_for_c = pd.concat([metrics_for_c, metrics_run], axis=0)
+        #joint
+        arch = 'joint'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_joint = dataloader.preprocess_joint(X1, y1, X2, y2)
+        trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+        trainer.set_loader(site_joint)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
 
+        #federated
+        arch = 'federated'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_1 = dataloader.preprocess(X1, y1)
+        site_2 = dataloader.preprocess(X2, y2)
+        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+        trainer.set_loader(site_1, site_2)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
         
-        '''
-        gradient_diversity = np.full((self.RUNS, self.EPOCHS), np.nan)
-        for i, arr in enumerate(self.gradient_diversity_for_c):
-            arr = arr.reshape(-1)
-            gradient_diversity[i, :len(arr)] = arr
-        '''
+        #pfedme
+        arch = 'pfedme'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_1 = dataloader.preprocess(X1, y1)
+        site_2 = dataloader.preprocess(X2, y2)
+        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme = True)
+        trainer.set_loader(site_1, site_2)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
 
+        #ditto
+        arch = 'ditto'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_1 = dataloader.preprocess(X1, y1)
+        site_2 = dataloader.preprocess(X2, y2)
+        trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+        trainer.set_loader(site_1, site_2)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
+        
+    return scores, train_losses, val_losses, test_losses
 
-        return self.c, self.losses_for_c, metrics_for_c
+def runAnalysis(DATASET, costs):
+    results_scores = {}
+    results_train_losses = {}
+    results_val_losses = {}
+    results_test_losses = {}
+    for c in costs:
+        results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c] =  modelRuns(DATASET, c)
 
+        with open(f'{ROOT_DIR}/results/{DATASET}_scores_full.pkl', 'wb') as f:
+            pickle.dump(results_scores, f)
+        
+        with open(f'{ROOT_DIR}/results/{DATASET}_train_losses_full.pkl', 'wb') as f:
+            pickle.dump(results_train_losses, f)
 
-def loss_dictionary_to_dataframe(losses, costs, RUNS):
-    ##EPOCH tracking of train and val
-    losses_df = {}
-    for architecture in ARCHITECTURES:
-        losses_df[architecture] = {}
-        for c in costs:
-            losses_df[architecture][c] = {}
-            loss_lists = losses[c][architecture]
-            max_length = max(len(loss) for loss in loss_lists)
-            padded_losses= [[loss + [np.nan] * (max_length - len(loss)) for loss in loss_lists[key]] for key in loss_lists]
-            losses_df[architecture][c]['train'] = pd.DataFrame(padded_losses[0])
-            losses_df[architecture][c]['val'] = pd.DataFrame(padded_losses[1])
+        with open(f'{ROOT_DIR}/results/{DATASET}_val_losses_full.pkl', 'wb') as f:
+            pickle.dump(results_val_losses, f)
+        
+        with open(f'{ROOT_DIR}/results/{DATASET}_test_losses_full.pkl', 'wb') as f:
+            pickle.dump(results_test_losses, f)
 
-    ##Per cost tracking of test losses (graphed in the same way as metric performance)
-    test_losses_df = {}
-    for architecture in ARCHITECTURES:
-        test_losses_df[architecture] = []
-        for c in costs:
-            loss = losses[c][architecture]['test_losses']
-            loss = [l[0] for l in loss]
-            test_losses_df[architecture].extend(loss)
-    test_losses_df = pd.DataFrame.from_dict(test_losses_df, orient = 'index').T
-    test_losses_df['cost'] =  [item for item in costs for _ in range(RUNS)]
-    return losses_df, test_losses_df
-
-def gradient_dictionary_to_dataframe(gradient_diversity):
-    rows_list = []
-    for cost, arr in gradient_diversity.items():
-        num_runs, num_epochs = arr.shape
-        for run in range(num_runs):
-            for epoch in range(num_epochs):
-                value = arr[run, epoch]
-                rows_list.append({'Cost': cost, 'Epoch': epoch, 'Run': run, 'Value': value})
-    df = pd.DataFrame(rows_list)
-    return df
-
+    return results_scores, results_train_losses, results_val_losses, results_test_losses

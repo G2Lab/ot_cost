@@ -13,6 +13,7 @@ global ROOT_DIR
 ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 DATASET_TYPES_TABULAR = {'Synthetic', 'Credit', 'Weather'}
 DATASET_TYPES_IMAGE = {'CIFAR', 'EMNIST', 'IXITiny', 'ISIC'}
+CONTINUOUS_OUTCOME = {'Weather'}
 torch.manual_seed(1)
 np.random.seed(1)
 
@@ -37,46 +38,73 @@ class TabularDatasetHandler(AbstractDatasetHandler):
         self.scaler = StandardScaler()
         self.scaler_label = StandardScaler()
     
-    def preprocess_data(self, dataloader, fit_transform = False):
-        X, y = dataloader
+    def preprocess_data(self, data, size, fit_transform = False):
+        X, y = data
         if fit_transform:
-            X_tensor = torch.tensor(self.scaler.fit_transform(X), dtype=torch.float32)
-            if self.dataset_name == 'Weather':
-                y_tensor = torch.tensor(self.scaler_label.fit_transform(y.reshape(-1, 1)), dtype=torch.float32)
+            ##preprocess on single dataset
+            self.scaler.fit(X[:size])
+            X_tensor = torch.tensor(self.scaler.transform(X), dtype=torch.float32)
+            if self.dataset_name in CONTINUOUS_OUTCOME:
+                y = y.reshape(-1,1)
+                self.scaler_label.fit(y[:size])
+                y_tensor = torch.tensor(self.scaler_label.transform(y), dtype=torch.float32)
             else:
                 y_tensor = torch.tensor(y, dtype=torch.float32)    
         else:
             X_tensor = torch.tensor(self.scaler.transform(X), dtype=torch.float32)
-            if self.dataset_name == 'Weather':
-                y_tensor = torch.tensor(self.scaler_label.transform(y.reshape(-1, 1)), dtype=torch.float32)   
+            if self.dataset_name in CONTINUOUS_OUTCOME:
+                y = y.reshape(-1,1)
+                y_tensor = torch.tensor(self.scaler_label.transform(y), dtype=torch.float32)   
             else:
                 y_tensor = torch.tensor(y, dtype=torch.float32)    
         return TensorDataset(X_tensor, y_tensor)
     
 class ImageDatasetHandler(AbstractDatasetHandler):
-    def preprocess_data(self, dl, fit_transform = False):
-        X, y = dl
+    def preprocess_data(self, data, size = None, fit_transform = False):
+        X, y = data
         if self.dataset_name in ['EMNIST', 'CIFAR']:
             X_tensor = torch.tensor(X, dtype=torch.float32)
             y_tensor = torch.tensor(y, dtype=torch.long)
             if self.dataset_name == 'EMNIST':
-                    X_tensor.unsqueeze_(1)
+                    if fit_transform:
+                       transform = transforms.Compose([
+                                            transforms.ToPILImage(),
+                                            transforms.RandomAffine(degrees=15, translate=(0.1, 0.1), scale=(0.8, 1.2)), 
+                                            transforms.Resize((28, 28)),
+                                            transforms.ToTensor(),
+                                            transforms.Normalize((0.5,), (0.5,)) ])
+                    else:
+                        transform = transforms.Compose([
+                                            transforms.ToPILImage(),
+                                            transforms.Resize((28, 28)),
+                                            transforms.ToTensor(),
+                                            transforms.Normalize((0.5,), (0.5,)) ])
+            
             elif self.dataset_name == 'CIFAR':
-                    transform = transforms.Compose([
-                                                    transforms.ToPILImage(),
-                                                    transforms.Resize((224, 224)),
-                                                    transforms.ToTensor()])
-                    X_tensor = torch.stack([transform(image) for image in X_tensor])
+                    if fit_transform:
+                        transform = transforms.Compose([
+                                    transforms.ToPILImage(),
+                                    transforms.Resize((224, 224)),
+                                    transforms.RandomHorizontalFlip(),
+                                    transforms.RandomRotation(10),
+                                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+                                    transforms.ToTensor(),
+                                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+                    else:
+                        transform = transforms.Compose([
+                            transforms.ToPILImage(),
+                            transforms.Resize((224, 224)),
+                            transforms.ToTensor(),
+                            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+            X_tensor = torch.stack([transform(image) for image in X_tensor])
             return TensorDataset(X_tensor, y_tensor)
         elif self.dataset_name in ['IXITiny']:
             return IXITinyDataset(dl)
         elif self.dataset_name in ['ISIC']:
             return ISICDataset(dl)
             
-        
-
 class IXITinyDataset(Dataset):
-    def __init__(self, data, transform=None):
+    def __init__(self, data, size = None, transform=None):
         image_paths, label_paths = data
         self.image_paths = image_paths
         landmarks = tio.HistogramStandardization.train(
@@ -105,7 +133,6 @@ class IXITinyDataset(Dataset):
     def __getitem__(self, idx):
         image_path = self.image_paths[idx]
         label_path = self.label_paths[idx]
-        #image = torch.load(image_path)
         image = torch.tensor(nib.load(image_path).get_fdata(), dtype=torch.float).unsqueeze(0)
         label = torch.tensor(nib.load(label_path).get_fdata(), dtype=torch.float).unsqueeze(0)
 
@@ -113,9 +140,8 @@ class IXITinyDataset(Dataset):
         label = self.transform_label(label)
         return image, label
     
-
 class ISICDataset(Dataset):
-    def __init__(self, data, transform=None):
+    def __init__(self, data, size = None, transform=None):
         image_paths, labels = data
         sz = 200
         mean=(0.585, 0.500, 0.486)
@@ -148,31 +174,31 @@ class DataPreprocessor:
         self.handler = get_dataset_handler(self.dataset)
 
     def preprocess(self, X, y):
-        train_data, val_data, test_data = self.split(X, y) 
-        return self.create_dataloaders(train_data, val_data, test_data)
+        train_data, val_data, test_data, size = self.split(X, y) 
+        return self.create_dataloaders(train_data, val_data, test_data, size)
     
     def preprocess_joint(self, X1, y1, X2, y2):
-        train_data, val_data, test_data = self.split_joint(X1, y1, X2, y2) 
-        return self.create_dataloaders(train_data, val_data, test_data)
+        train_data, val_data, test_data, size = self.split_joint(X1, y1, X2, y2) 
+        return self.create_dataloaders(train_data, val_data, test_data, size)
 
     def split(self, X, y, test_size=0.2, val_size = 0.2):
         X_train_temp, X_test, y_train_temp, y_test = train_test_split(X, y, test_size = test_size, random_state=np.random.RandomState(42))
         X_train, X_val, y_train, y_val = train_test_split(X_train_temp, y_train_temp, test_size = val_size, random_state=np.random.RandomState(42))
-        return (X_train, y_train), (X_val, y_val), (X_test, y_test)
+        return (X_train, y_train), (X_val, y_val), (X_test, y_test), X_train.shape[0]
     
     def split_joint(self, X1, y1, X2, y2):
-        (X_train1, y_train1), (X_val1, y_val1), (X_test, y_test)= self.split(X1, y1)
-        (X_train2, y_train2), (X_val2, y_val2), (_, _) = self.split(X2, y2)
+        (X_train1, y_train1), (X_val1, y_val1), (X_test, y_test), size = self.split(X1, y1)
+        (X_train2, y_train2), (X_val2, y_val2), (_, _), _ = self.split(X2, y2)
         X_train = np.concatenate((X_train1, X_train2), axis = 0)
         y_train = np.concatenate((y_train1, y_train2), axis = 0)
         X_val = np.concatenate((X_val1, X_val2), axis = 0)
         y_val = np.concatenate((y_val1, y_val2), axis = 0)
-        return (X_train, y_train), (X_val, y_val), (X_test, y_test)
+        return (X_train, y_train), (X_val, y_val), (X_test, y_test), size
 
-    def create_dataloaders(self, train_data, val_data, test_data):
-        train_data = self.handler.preprocess_data(train_data, fit_transform= True)
-        val_data = self.handler.preprocess_data(val_data, fit_transform= False)
-        test_data = self.handler.preprocess_data(test_data, fit_transform= False)
+    def create_dataloaders(self, train_data, val_data, test_data, size):
+        train_data = self.handler.preprocess_data(train_data, size, fit_transform= True)
+        val_data = self.handler.preprocess_data(val_data, size, fit_transform= False)
+        test_data = self.handler.preprocess_data(test_data, size, fit_transform= False)
         train_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
         val_loader = DataLoader(val_data, batch_size=self.batch_size, shuffle = False)
         test_loader = DataLoader(test_data, batch_size=self.batch_size, shuffle = False)

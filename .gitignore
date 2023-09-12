@@ -6,3 +6,4 @@ ISIC/efficientnet_ae
 helper/archive
 slurm*
 archive/
+.ipynb_checkpoints/

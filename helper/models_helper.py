@@ -11,6 +11,7 @@ import data_preprocessing as dp
 import trainers as tr
 import pipeline as pp
 import importlib
+import torch.nn.functional as F
 from torchvision import models
 from unet import UNet
 importlib.reload(dp)
@@ -101,25 +102,32 @@ class Weather(torch.nn.Module):
 class EMNIST(nn.Module):
     def __init__(self, CLASSES):
         super(EMNIST, self).__init__()
+        self.layer1 = nn.Sequential(
+            nn.Conv2d(1, 6, kernel_size=5, stride=1, padding=0),
+            nn.BatchNorm2d(6),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size = 2, stride = 2))
+        self.layer2 = nn.Sequential(
+            nn.Conv2d(6, 16, kernel_size=5, stride=1, padding=0),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size = 2, stride = 2))
+        self.fc = nn.Linear(256, 120)
+        self.relu = nn.ReLU()
+        self.fc1 = nn.Linear(120, 84)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(84, CLASSES)
         
-        self.resnet = models.resnet18(weights='ResNet18_Weights.DEFAULT')
-        for param in self.resnet.parameters():
-            param.requires_grad = False
-        for param in self.resnet.layer4.parameters():
-            param.requires_grad = True
-        
-        num_ftrs = self.resnet.fc.in_features
-        self.resnet.fc = nn.Sequential(nn.Linear(num_ftrs, 200),
-                                        nn.ReLU(),
-                                        nn.Linear(200, CLASSES)
-        )
-        for layer in self.resnet.fc:
-                if isinstance(layer, nn.Linear):
-                        nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-                        nn.init.constant_(layer.bias, 0)
     def forward(self, x):
-        x = self.resnet(x)
-        return x
+        out = self.layer1(x)
+        out = self.layer2(out)
+        out = out.reshape(out.size(0), -1)
+        out = self.fc(out)
+        out = self.relu(out)
+        out = self.fc1(out)
+        out = self.relu1(out)
+        out = self.fc2(out)
+        return out
 
 class CIFAR(nn.Module):
     def __init__(self, CLASSES):

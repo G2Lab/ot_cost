@@ -11,7 +11,6 @@ sys.path.append(f'{ROOT_DIR}/code/helper')
 import data_preprocessing as dp
 import trainers as tr
 import models_helper as mh
-import hyperparameters as hp
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR, LambdaLR
 import importlib
@@ -19,7 +18,6 @@ import pickle
 importlib.reload(dp)
 importlib.reload(tr)
 importlib.reload(mh)
-importlib.reload(hp)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TABULAR = ['Synthetic', 'Credit', 'Weather']
@@ -33,7 +31,7 @@ def loadData(DATASET, DATA_DIR, data_num, cost):
             X = X.sample(800)
         elif DATASET == 'Credit':
             X = pd.read_csv(f'{DATA_DIR}/data_{data_num}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(29)])
-            X = X.sample(800, replace=True)
+            X = X.sample(800,replace=True)
         elif DATASET == 'Weather':
             X = pd.read_csv(f'{DATA_DIR}/data_{data_num}_{cost:.2f}.csv', sep = ' ', names = [i for i in range(124)])
             X = X.sample(n=1600)
@@ -103,7 +101,6 @@ def set_parameters_for_dataset(DATASET):
         EPOCHS = 300
         WARMUP_STEPS = EPOCHS // 15
         BATCH_SIZE = 2000
-        RUNS = 3
         DATASET = 'Synthetic'
         METRIC_TEST = 'F1'
 
@@ -112,7 +109,6 @@ def set_parameters_for_dataset(DATASET):
         EPOCHS = 300
         WARMUP_STEPS = EPOCHS // 15 
         BATCH_SIZE = 2000
-        RUNS = 500
         DATASET = 'Credit'
         METRIC_TEST = 'F1'
 
@@ -121,7 +117,6 @@ def set_parameters_for_dataset(DATASET):
         EPOCHS = 300
         WARMUP_STEPS = EPOCHS // 15 
         BATCH_SIZE = 4000
-        RUNS = 500
         METRIC_TEST = 'R2'
 
     elif DATASET == 'EMNIST':
@@ -129,15 +124,13 @@ def set_parameters_for_dataset(DATASET):
         EPOCHS = 500
         WARMUP_STEPS = EPOCHS // 15
         BATCH_SIZE = 5000
-        RUNS = 10
         METRIC_TEST = 'Accuracy'
 
     elif DATASET == 'CIFAR':
         DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
         EPOCHS = 500
         WARMUP_STEPS = EPOCHS // 15
-        BATCH_SIZE = 256
-        RUNS = 10
+        BATCH_SIZE = 128
         METRIC_TEST = 'Accuracy'
 
     elif DATASET == 'IXITiny':
@@ -145,7 +138,6 @@ def set_parameters_for_dataset(DATASET):
         EPOCHS = 100
         WARMUP_STEPS = EPOCHS // 15
         BATCH_SIZE = 12
-        RUNS = 5
         METRIC_TEST = 'DICE'
     
     elif DATASET == 'ISIC':
@@ -153,29 +145,26 @@ def set_parameters_for_dataset(DATASET):
         EPOCHS = 500
         WARMUP_STEPS = EPOCHS // 15
         BATCH_SIZE = 32
-        RUNS = 3
         METRIC_TEST = 'Balanced_accuracy'
+    if DATASET in ['IXITiny', 'ISIC']:
+        RUNS = 1 # Small number of runs to test
+    elif DATASET in ['EMNIST', 'CIFAR']:
+        RUNS = 10
+    elif DATASET in ['Synthetic', 'Credit', 'Weather']:
+        RUNS = 100
     return DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST
 
-def createModel(DATASET, architecture, c, WARMUP_STEPS):
+def createModel(DATASET, architecture, c, WARMUP_STEPS, LR, OPTIM):
     if DATASET == 'Synthetic':
-        LR_dict = hp.Synthetic_LR_dict[c]
-        OPTIM_dict = hp.Synthetic_OPTIM_dict[c]
         model = mh.Synthetic()
         criterion = nn.BCELoss()
     elif DATASET == 'Credit':
-        LR_dict = hp.Credit_LR_dict[c]
-        OPTIM_dict = hp.Credit_OPTIM_dict[c]
         model = mh.Credit()
         criterion = nn.BCELoss()
     elif DATASET == 'Weather':
-        LR_dict = hp.Weather_LR_dict[c]
-        OPTIM_dict = hp.Weather_OPTIM_dict[c]
         model = mh.Weather()
         criterion = nn.MSELoss()
     elif DATASET == 'EMNIST':
-        LR_dict = hp.EMNIST_LR_dict[c]
-        OPTIM_dict = hp.EMNIST_OPTIM_dict[c]
         with open(f'{ROOT_DIR}/data/{DATASET}/CLASSES', 'rb') as f:
             classes_used = pickle.load(f)
             if architecture == 'single':
@@ -185,37 +174,31 @@ def createModel(DATASET, architecture, c, WARMUP_STEPS):
         model = mh.EMNIST(CLASSES)
         criterion = nn.CrossEntropyLoss()
     elif DATASET == 'CIFAR':
-        LR_dict = hp.CIFAR_LR_dict[c]
-        OPTIM_dict = hp.CIFAR_OPTIM_dict[c]
         with open(f'{ROOT_DIR}/data/{DATASET}/CLASSES', 'rb') as f:
             classes_used = pickle.load(f)
             if architecture == 'single':
                 CLASSES = len(classes_used[c][0])
             else:
                 CLASSES = len(set(classes_used[c][0] + classes_used[c][1]))
-        model = mh.EMNIST(CLASSES)
+        model = mh.CIFAR(CLASSES)
         criterion = nn.CrossEntropyLoss()
     elif DATASET == 'IXITiny':
-        LR_dict = hp.IXITiny_LR_dict[c]
-        OPTIM_dict = hp.IXITiny_OPTIM_dict[c]
         model = mh.IXITiny()
         criterion = get_dice_loss
     elif DATASET == 'ISIC':
-        LR_dict = hp.ISIC_LR_dict[c]
-        OPTIM_dict = hp.ISIC_OPTIM_dict[c]
         model = mh.ISIC()
         criterion = nn.CrossEntropyLoss()
     model.to(DEVICE)
-
-    if OPTIM_dict[architecture] == 'ADM':
-        LR = LR_dict[architecture]
+    
+    #Different optimizers for federated and non federated
+    if OPTIM == 'ADM':
         optimizer = torch.optim.AdamW(model.parameters(), lr = LR, amsgrad = True, betas = (0.9, 0.999))
-    elif OPTIM_dict[architecture] == 'SGD':
-        LR = LR_dict[architecture]
+    else:
         optimizer = torch.optim.SGD(model.parameters(), lr = LR, momentum = 0.9, weight_decay = 1e-4)
     exp_scheduler = ExponentialLR(optimizer, gamma=0.9)
     warmup_scheduler = LambdaLR(optimizer, lr_lambda=lambda step: min(1.0, step / WARMUP_STEPS))
     lr_scheduler = (warmup_scheduler, exp_scheduler)
+    
     return model, criterion, optimizer, lr_scheduler
           
 def get_dice_loss(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):
@@ -233,94 +216,76 @@ def get_dice_loss(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):
 
 def modelRuns(DATASET, c):
     DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST = set_parameters_for_dataset(DATASET)
-    scores = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    test_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    val_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    train_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    gradient_diversity = {'metric':[], 'cosine': []}
+    #excuse the laziness ;)
+    scores = {'single':{'ADM':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}, 'SGD':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}}, 
+              'joint':{'ADM':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}, 'SGD':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}},
+              'federated':{'ADM':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}, 'SGD':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}}, 
+              'pfedme':{'ADM':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}, 'SGD':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}},
+              'ditto':{'ADM':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}, 'SGD':{1e-1:[], 5e-2:[], 1e-2:[], 5e-3:[], 5e-4:[]}}}
     X1, y1 = loadData(DATASET, DATA_DIR, 1, c)
     X2, y2 = loadData(DATASET, DATA_DIR, 2, c)
+    LR_try = [1e-1, 5e-2, 1e-2, 5e-3, 5e-4]
+    OPTIM_try = ['ADM', 'SGD']
+    for OPTIM in OPTIM_try:
+        for LR in LR_try:
+            for _ in range(RUNS):
+                #single
+                arch = 'single'
+                model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                site_1 = dataloader.preprocess(X1, y1)
+                trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+                trainer.set_loader(site_1)
+                score, test_loss, val_loss, train_loss = trainer.run()
+                scores[arch][OPTIM][LR].append(score)
 
-    for _ in range(RUNS):
-        #single
-        arch = 'single'
-        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
-        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
-        site_1 = dataloader.preprocess(X1, y1)
-        trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
-        trainer.set_loader(site_1)
-        score, test_loss, val_loss, train_loss = trainer.run()
-        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
+                #joint
+                arch = 'joint'
+                model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                site_joint = dataloader.preprocess_joint(X1, y1, X2, y2)
+                trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+                trainer.set_loader(site_joint)
+                score, test_loss, val_loss, train_loss = trainer.run()
+                scores[arch][OPTIM][LR].append(score)
 
-        #joint
-        arch = 'joint'
-        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
-        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
-        site_joint = dataloader.preprocess_joint(X1, y1, X2, y2)
-        trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
-        trainer.set_loader(site_joint)
-        score, test_loss, val_loss, train_loss = trainer.run()
-        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
-
-        #federated
-        arch = 'federated'
-        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
-        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
-        site_1 = dataloader.preprocess(X1, y1)
-        site_2 = dataloader.preprocess(X2, y2)
-        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
-        trainer.set_loader(site_1, site_2)
-        score, test_loss, val_loss, train_loss = trainer.run()
-        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
-        gradient_diversity['metric'] = trainer.gradient_diversity_metric
-        gradient_diversity['cosine'] = trainer.gradient_diversity_cosine
-        
-        #pfedme
-        arch = 'pfedme'
-        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
-        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
-        site_1 = dataloader.preprocess(X1, y1)
-        site_2 = dataloader.preprocess(X2, y2)
-        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme = True)
-        trainer.set_loader(site_1, site_2)
-        score, test_loss, val_loss, train_loss = trainer.run()
-        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
-
-        #ditto
-        arch = 'ditto'
-        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
-        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
-        site_1 = dataloader.preprocess(X1, y1)
-        site_2 = dataloader.preprocess(X2, y2)
-        trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
-        trainer.set_loader(site_1, site_2)
-        score, test_loss, val_loss, train_loss = trainer.run()
-        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
-        
-    return scores, train_losses, val_losses, test_losses, gradient_diversity
+                #federated
+                arch = 'federated'
+                model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                site_1 = dataloader.preprocess(X1, y1)
+                site_2 = dataloader.preprocess(X2, y2)
+                trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+                trainer.set_loader(site_1, site_2)
+                score, test_loss, val_loss, train_loss = trainer.run()
+                scores[arch][OPTIM][LR].append(score)
+                
+                #pfedme
+                arch = 'pfedme'
+                model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                site_1 = dataloader.preprocess(X1, y1)
+                site_2 = dataloader.preprocess(X2, y2)
+                trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme = True)
+                trainer.set_loader(site_1, site_2)
+                score, test_loss, val_loss, train_loss = trainer.run()
+                scores[arch][OPTIM][LR].append(score)
+                #ditto
+                arch = 'ditto'
+                model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                site_1 = dataloader.preprocess(X1, y1)
+                site_2 = dataloader.preprocess(X2, y2)
+                trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+                trainer.set_loader(site_1, site_2)
+                score, test_loss, val_loss, train_loss = trainer.run()
+                scores[arch][OPTIM][LR].append(score)
+    return scores
 
 def runAnalysis(DATASET, costs):
     results_scores = {}
-    results_train_losses = {}
-    results_val_losses = {}
-    results_test_losses = {}
-    gradient_diversities = {}
     for c in costs:
-        results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c], gradient_diversities[c] =  modelRuns(DATASET, c)
-
-    with open(f'{ROOT_DIR}/results/{DATASET}_scores_full.pkl', 'wb') as f:
-        pickle.dump(results_scores, f)
-    
-    with open(f'{ROOT_DIR}/results/{DATASET}_train_losses_full.pkl', 'wb') as f:
-        pickle.dump(results_train_losses, f)
-
-    with open(f'{ROOT_DIR}/results/{DATASET}_val_losses_full.pkl', 'wb') as f:
-        pickle.dump(results_val_losses, f)
-    
-    with open(f'{ROOT_DIR}/results/{DATASET}_test_losses_full.pkl', 'wb') as f:
-        pickle.dump(results_test_losses, f)
-    
-    with open(f'{ROOT_DIR}/results/{DATASET}_gradient_diversities_full.pkl', 'wb') as f:
-        pickle.dump(gradient_diversities, f)
-
-    return results_scores, results_train_losses, results_val_losses, results_test_losses
+        results_scores[c] =  modelRuns(DATASET, c)
+        with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'wb') as f:
+            pickle.dump(results_scores, f)
+    return results_scores

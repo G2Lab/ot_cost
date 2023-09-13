@@ -14,6 +14,7 @@ ROOT_DIR = '/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
 DATASET_TYPES_TABULAR = {'Synthetic', 'Credit', 'Weather'}
 DATASET_TYPES_IMAGE = {'CIFAR', 'EMNIST', 'IXITiny', 'ISIC'}
 CONTINUOUS_OUTCOME = {'Weather'}
+LARGE_TEST_SET = {'Synthetic', 'Credit', 'Weather', 'CIFAR', 'EMNIST'}
 torch.manual_seed(1)
 np.random.seed(1)
 
@@ -99,9 +100,9 @@ class ImageDatasetHandler(AbstractDatasetHandler):
             X_tensor = torch.stack([transform(image) for image in X_tensor])
             return TensorDataset(X_tensor, y_tensor)
         elif self.dataset_name in ['IXITiny']:
-            return IXITinyDataset(dl)
+            return IXITinyDataset(data)
         elif self.dataset_name in ['ISIC']:
-            return ISICDataset(dl)
+            return ISICDataset(data)
             
 class IXITinyDataset(Dataset):
     def __init__(self, data, size = None, transform=None):
@@ -182,6 +183,10 @@ class DataPreprocessor:
         return self.create_dataloaders(train_data, val_data, test_data, size)
 
     def split(self, X, y, test_size=0.2, val_size = 0.2):
+        if self.dataset in LARGE_TEST_SET :
+            test_size = 0.6 #Make large test set so test metrics are more stable (larger sample size added)
+        else:
+            test_size = 0.2
         X_train_temp, X_test, y_train_temp, y_test = train_test_split(X, y, test_size = test_size, random_state=np.random.RandomState(42))
         X_train, X_val, y_train, y_val = train_test_split(X_train_temp, y_train_temp, test_size = val_size, random_state=np.random.RandomState(42))
         return (X_train, y_train), (X_val, y_val), (X_test, y_test), X_train.shape[0]

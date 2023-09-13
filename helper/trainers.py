@@ -13,6 +13,7 @@ import importlib
 importlib.reload(dp)
 from sklearn import metrics
 import torch.nn.functional as F
+from scipy.spatial.distance import cosine
 
 SQUEEZE = ['Synthetic', 'Credit']
 LONG = ['EMNIST', 'CIFAR', 'ISIC']
@@ -202,7 +203,8 @@ class FederatedModelTrainer(ModelTrainer):
         self.pfedme = pfedme
         self.pfedme_reg = pfedme_reg
         self.ROUNDS = 1
-        self.gradient_diversity = []
+        self.gradient_diversity_metric = []
+        self.gradient_diversity_cosine = []
 
     def set_loader(self, site_1_data, site_2_data):
         self.train_loader_1, self.val_loader_1, self.test_loader_1 = site_1_data
@@ -242,6 +244,8 @@ class FederatedModelTrainer(ModelTrainer):
         model.load_state_dict(tmp_model.state_dict())
         #if basic fedavg then update local models
         if not self.pfedme:
+            if not self.ditto:
+                self.gradient_diversity(model_1, model_2)
             model_1.load_state_dict(model.state_dict())
             model_2.load_state_dict(model.state_dict())  
             assert self.compare_state_dicts(model.state_dict(), model_1.state_dict()) and self.compare_state_dicts(model.state_dict(), model_2.state_dict()), "The model weights are not identical."
@@ -256,6 +260,27 @@ class FederatedModelTrainer(ModelTrainer):
         regularization_loss = self.pfedme_reg * regularization_loss
         loss += regularization_loss
         return loss
+    
+    def gradient_diversity(self, model_1, model_2):
+        #Get model gradients
+        grads = {'model_1': [], 'model_2':[]}
+        for name, param in model_1.named_parameters():
+                if param.requires_grad:
+                    grads['model_1'].append(param.grad.clone().detach())
+        for name, param in model_2.named_parameters():
+                if param.requires_grad:  
+                    grads['model_2'].append(param.grad.clone().detach())
+        #wrangle
+        model_1_g = torch.cat([w.flatten() for w in grads['model_1']])
+        model_2_g = torch.cat([w.flatten() for w in grads['model_2']])
+        #calculate diversity
+        num = torch.norm(model_1_g)**2  + torch.norm(model_2_g)**2
+        denom = torch.norm(model_1_g + model_2_g)**2
+        gradient_diversity_metric = (num/ denom).cpu().numpy().reshape(1)[0]
+        self.gradient_diversity_metric.append(gradient_diversity_metric)
+        cosine_gradient_diversity = cosine(model_1_g.cpu().numpy().astype(float), model_2_g.cpu().numpy().astype(float))
+        self.gradient_diversity_cosine.append(cosine_gradient_diversity)
+        return
 
     def run(self):
         train_losses = []

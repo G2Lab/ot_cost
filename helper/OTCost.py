@@ -15,11 +15,12 @@ TABULAR =  {'Synthetic', 'Credit', 'Weather'}
 IMAGE = {'CIFAR', 'EMNIST', 'IXITiny'}
 
 class OTCost:
-    def __init__(self, dataset, data, label, private=False, lam=1e-3):
+    def __init__(self, dataset, data, label, private=False, eps=1e-3, lam = (2,1)):
         self.dataset = dataset
         self.data = data
         self.label = label
         self.private = private
+        self.eps = eps
         self.lam = lam
         self.label_costs = []
         self.feature_costs = []
@@ -73,10 +74,9 @@ class OTCost:
             index_2 = np.argwhere(self.label['2'] == i[1]).reshape(1,-1)[0] 
             feat_cost = self.feature_cost(i, index_1, index_2)              
             label_cost = self.label_cost(i, index_1, index_2)
-            normalization_param = 3
 
-            cost = feat_cost + label_cost
-            cost /= normalization_param
+            cost = self.lam[0]*feat_cost/2 + self.lam[1]*label_cost # we divide feat_cost by 2 so score is between 0-1 like hellinger
+            cost /= (self.lam[0] + self.lam[1])
             #Fill cost matrix
             for idx1_val, idx1_index in enumerate(index_1):
                 for idx2_val, idx2_index in enumerate(index_2):
@@ -89,7 +89,7 @@ class OTCost:
         #Stability param ensures the algorithm works with the epsilon in the algorithm
         costs_stable = self.costs_all
         a, b = np.ones((costs_stable.shape[0])) / costs_stable.shape[0], np.ones((costs_stable.shape[1])) / costs_stable.shape[1]
-        self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.lam, stopThr=1e-6, numItermax=20000, warn = True, verbose=False)
+        self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.eps, stopThr=1e-6, numItermax=20000, warn = True, verbose=False)
         ot_cost = (self.Gs * self.costs_all).sum()
         print(f'cost: {"{:.2f}".format(ot_cost)}')
         return ot_cost

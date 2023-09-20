@@ -22,7 +22,24 @@ importlib.reload(mh)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TABULAR = ['Synthetic', 'Credit', 'Weather']
 CLASS_ADJUST = ['EMNIST', 'CIFAR'] # as each dataset cost has different labels
-     
+
+def check_gpu():
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        print(f"{num_gpus} GPU(s) available.")
+        for i in range(num_gpus):
+            print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+
+            # To check GPU memory allocation (useful to determine if it's in use)
+            total_mem = torch.cuda.get_device_properties(i).total_memory / 1e9  # Convert bytes to GB
+            allocated_mem = torch.cuda.memory_allocated(i) / 1e9
+            cached_mem = torch.cuda.memory_reserved(i) / 1e9
+
+            print(f"  Total Memory: {total_mem:.2f} GB")
+            print(f"  Allocated Memory: {allocated_mem:.2f} GB")
+            print(f"  Cached Memory: {cached_mem:.2f} GB")
+check_gpu()
+
 def loadData(DATASET, DATA_DIR, data_num, cost):
     if DATASET in TABULAR:
         if DATASET == 'Synthetic':
@@ -130,7 +147,7 @@ def set_parameters_for_dataset(DATASET):
         DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
         EPOCHS = 500
         WARMUP_STEPS = EPOCHS // 15
-        BATCH_SIZE = 128
+        BATCH_SIZE = 64
         METRIC_TEST = 'Accuracy'
 
     elif DATASET == 'IXITiny':
@@ -144,12 +161,14 @@ def set_parameters_for_dataset(DATASET):
         DATA_DIR = f'{ROOT_DIR}/data/{DATASET}'
         EPOCHS = 500
         WARMUP_STEPS = EPOCHS // 15
-        BATCH_SIZE = 32
+        BATCH_SIZE = 128
         METRIC_TEST = 'Balanced_accuracy'
     if DATASET in ['IXITiny', 'ISIC']:
         RUNS = 1 # Small number of runs to test
-    elif DATASET in ['EMNIST', 'CIFAR']:
+    elif DATASET in ['EMNIST']:
         RUNS = 10
+    elif DATASET in ['CIFAR']:
+        RUNS = 5
     elif DATASET in ['Synthetic', 'Credit', 'Weather']:
         RUNS = 100
     return DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST
@@ -181,12 +200,15 @@ def createModel(DATASET, architecture, c, WARMUP_STEPS, LR, OPTIM):
             else:
                 CLASSES = len(set(classes_used[c][0] + classes_used[c][1]))
         model = mh.CIFAR(CLASSES)
+        model = nn.DataParallel(model)
         criterion = nn.CrossEntropyLoss()
     elif DATASET == 'IXITiny':
         model = mh.IXITiny()
+        model = nn.DataParallel(model)
         criterion = get_dice_loss
     elif DATASET == 'ISIC':
         model = mh.ISIC()
+        model = nn.DataParallel(model)
         criterion = nn.CrossEntropyLoss()
     model.to(DEVICE)
     
@@ -284,6 +306,11 @@ def modelRuns(DATASET, c):
 
 def runAnalysis(DATASET, costs):
     results_scores = {}
+    if f'{DATASET}_hyperparameter_search.pkl' in os.listdir(f'{ROOT_DIR}/results/'):
+        with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'rb') as f:
+            results_scores = pickle.load(f)
+    costs = list(set(costs)- set(list(results_scores.keys())))
+    
     for c in costs:
         results_scores[c] =  modelRuns(DATASET, c)
         with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'wb') as f:

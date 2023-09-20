@@ -2,16 +2,17 @@
 # coding: utf-8
 
 import numpy as np
+np.warnings.filterwarnings('ignore', category=RuntimeWarning)
 from itertools import product
 import ot
 from sklearn.preprocessing import normalize
 import sympy as sym
-from scipy.linalg import eigh
+from scipy.linalg import eigh, sqrtm
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 TABULAR =  {'Synthetic', 'Credit', 'Weather'}
-IMAGE = {'CIFAR', 'EMNIST', 'IXITiny'}
+IMAGE = {'CIFAR', 'EMNIST', 'IXITiny', 'ISIC'}
 
 class OTCost:
     def __init__(self, dataset, data, label, private=False, lam=1e-3):
@@ -23,16 +24,15 @@ class OTCost:
         self.label_costs = []
         self.feature_costs = []
     
-    def normalize_data(self, part_X1, part_X2):
-        return normalize(part_X1, axis = 1, norm = 'l2'), normalize(part_X2, axis = 1, norm = 'l2')
-
     def feature_cost(self, i, index_1, index_2):
         if not self.private:
             part_X1 = self.data['1'][index_1]
             part_X2 = self.data['2'][index_2]
-            part_X1, part_X2 = self.normalize_data(part_X1, part_X2)
-            feature_cost = ot.dist(part_X1, part_X2)
-            self.feature_costs.append((i, np.percentile(feature_cost, 10), np.percentile(feature_cost, 25), np.percentile(feature_cost, 50)))
+            vector_dim = part_X1.shape[1]
+            if vector_dim > 1000:
+                part_X1, part_X2 = compress_vector((-1,1), part_X1, part_X2)
+            feature_cost = ot.dist(part_X1, part_X2) # EUCLIDEAN DISTANCE
+            self.feature_costs.append((i, np.percentile(feature_cost, 10), np.percentile(feature_cost, 25), np.percentile(feature_cost, 50), np.percentile(feature_cost, 75), np.percentile(feature_cost, 90)))
         else:
             feature_cost = privateDotproduct(self.data, index_1, index_2)
         return feature_cost
@@ -47,12 +47,14 @@ class OTCost:
         mu_2, sigma_2 = get_normal_params(compressed_X2)
 
         label_cost = label_distance(mu_1, sigma_1, mu_2, sigma_2)
-        if label_cost == None:
+        while label_cost == None:
             #repeat with smaller number of PC's
             n_components = compressed_X1.shape[1]
-            halfway = n_components // 2
-            mu_1, sigma_1 = get_normal_params(compressed_X1[:,:halfway])
-            mu_2, sigma_2 = get_normal_params(compressed_X2[:,:halfway])
+            partway = n_components  - n_components // 8
+            compressed_X1 = compressed_X1[:,:partway]
+            compressed_X2 = compressed_X2[:,:partway]
+            mu_1, sigma_1 = get_normal_params(compressed_X1)
+            mu_2, sigma_2 = get_normal_params(compressed_X2)
             label_cost = label_distance(mu_1, sigma_1, mu_2, sigma_2)
         self.label_costs.append((i, label_cost))
         return label_cost
@@ -78,13 +80,13 @@ class OTCost:
         self.costs_all = costs_all
         return
             
-    def calculate_ot_cost(self, stability_param = 1e1):
+    def calculate_ot_cost(self):
         self.total_cost()
         #Stability param ensures the algorithm works with the epsilon in the algorithm
-        costs_stable = self.costs_all / stability_param
+        costs_stable = self.costs_all / (self.costs_all.mean()*5)
         a, b = np.ones((costs_stable.shape[0])) / costs_stable.shape[0], np.ones((costs_stable.shape[1])) / costs_stable.shape[1]
-        self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.lam, stopThr=1e-6, numItermax=12000, warn = True, verbose=False)
-        ot_cost = (self.Gs * self.costs_all).sum()
+        self.Gs = ot.bregman.sinkhorn_stabilized(a, b, costs_stable, self.lam, stopThr=1e-6, numItermax=20000, warn = True, verbose=False)
+        ot_cost = (self.Gs * self.costs_all).sum() * (self.costs_all.mean()*5)
         print(f'cost: {"{:.2f}".format(ot_cost)}')
         return ot_cost
 
@@ -101,8 +103,10 @@ def label_distance(mu_1, sigma_1, mu_2, sigma_2):
     sigma_b_sqrt = sqrtm(sigma_2)
     frobenius_norm = np.linalg.norm(sigma_a_sqrt - sigma_b_sqrt, 'fro')**2
     cost = euclidean_distance + frobenius_norm
+    if np.isnan(cost):
+        cost = None
+        print('Degenerate vector, reducing dimension')
     return cost
-
 
 def compress_vector(i, data_1, data_2):
     #compression doesnt violate privacy as its fit on one dataset only

@@ -171,13 +171,14 @@ class ModelTrainer:
                 predictions_array = np.clip(predictions_array, -2, 2) #clipping of values well off normalised labels
             elif self.DATASET in SQUEEZE:
                 predictions_array = (predictions_array >= 0.5).astype(int) # set predictions for F1 score
-            elif self.DATASET in TENSOR:
-                score = metric_assess(torch.tensor(true_labels_array, dtype=torch.float32), torch.tensor(predictions_array,dtype=torch.float32))
             elif self.DATASET in LONG:
                     predictions_array = predictions_array.argmax(axis = 1) 
             true_labels_array = np.array(true_labels_list)
             metric_assess = self.get_metric()
-            score = metric_assess(true_labels_array, predictions_array)
+            if self.DATASET in TENSOR:
+                score = metric_assess(torch.tensor(true_labels_array, dtype=torch.float32), torch.tensor(predictions_array,dtype=torch.float32))
+            else:
+                score = metric_assess(true_labels_array, predictions_array)
             return test_loss, score
 
     def run(self):

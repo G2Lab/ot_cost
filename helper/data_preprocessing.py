@@ -17,6 +17,7 @@ CONTINUOUS_OUTCOME = {'Weather'}
 LARGE_TEST_SET = {'Synthetic', 'Credit', 'Weather', 'CIFAR', 'EMNIST'}
 torch.manual_seed(1)
 np.random.seed(1)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_dataset_handler(dataset_name):
     if dataset_name in DATASET_TYPES_TABULAR:
@@ -204,7 +205,12 @@ class DataPreprocessor:
         train_data = self.handler.preprocess_data(train_data, size, fit_transform= True)
         val_data = self.handler.preprocess_data(val_data, size, fit_transform= False)
         test_data = self.handler.preprocess_data(test_data, size, fit_transform= False)
-        train_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
-        val_loader = DataLoader(val_data, batch_size=self.batch_size, shuffle = False)
-        test_loader = DataLoader(test_data, batch_size=self.batch_size, shuffle = False)
+        if DEVICE == 'cuda':
+            train_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True, pin_memory=True, num_workers=4, prefetch_factor = 2)
+            val_loader = DataLoader(val_data, batch_size=self.batch_size, shuffle = False, pin_memory=True, num_workers=4, prefetch_factor = 2)
+            test_loader = DataLoader(test_data, batch_size=self.batch_size, shuffle = False, pin_memory=True, num_workers=4, prefetch_factor = 2)
+        else:
+            train_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
+            val_loader = DataLoader(val_data, batch_size=self.batch_size, shuffle = False)
+            test_loader = DataLoader(test_data, batch_size=self.batch_size, shuffle = False)
         return train_loader, val_loader, test_loader

@@ -1,6 +1,5 @@
 __pycache__/
 workingbook.ipynb
-regularization_param/
 ISIC/vgg_ae
 ISIC/efficientnet_ae
 helper/archive

@@ -33,7 +33,7 @@ class OTCost:
             part_X1 = self.data['1'][index_1]
             part_X2 = self.data['2'][index_2]
             vector_dim = part_X1.shape[1]
-            if vector_dim > 1000:
+            if vector_dim > 8000:
                 part_X1, part_X2 = compress_vector((-1,1), part_X1, part_X2)
             part_X1, part_X2 = self.normalize_data(part_X1, part_X2)
             feature_cost = (1 - np.dot(part_X1, part_X2.T))
@@ -52,7 +52,8 @@ class OTCost:
         mu_2, sigma_2 = get_normal_params(compressed_X2)
 
         label_cost = hellinger_distance(mu_1, sigma_1, mu_2, sigma_2)
-        while label_cost == None:
+        iteration = 0
+        while (label_cost == None):
             #repeat with smaller number of PC's
             n_components = compressed_X1.shape[1]
             partway = n_components  - n_components // 8
@@ -61,6 +62,11 @@ class OTCost:
             mu_1, sigma_1 = get_normal_params(compressed_X1)
             mu_2, sigma_2 = get_normal_params(compressed_X2)
             label_cost = hellinger_distance(mu_1, sigma_1, mu_2, sigma_2)
+            iteration += 1
+            if iteration >= 4:
+                label_cost = 0.5
+                print('Assigned average value')
+                break
         self.label_costs.append((i, label_cost))
         return label_cost
 
@@ -98,6 +104,9 @@ class OTCost:
 def get_normal_params(part_data):
     mu = np.mean(part_data, axis=0)
     sigma = np.cov(part_data, rowvar=False)
+    if sigma.shape[0] != sigma.shape[1]:
+        print("The matrix is not square!")
+        print(sigma)
     return mu, sigma
 
 def hellinger_distance(mu_1, sigma_1, mu_2, sigma_2):

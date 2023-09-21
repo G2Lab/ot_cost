@@ -7,4 +7,3 @@ slurm*
 run_models/slurm*
 archive/
 .ipynb_checkpoints/
-lambda_param/

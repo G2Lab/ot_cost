@@ -304,15 +304,70 @@ def modelRuns(DATASET, c):
                 scores[arch][OPTIM][LR].append(score)
     return scores
 
-def runAnalysis(DATASET, costs):
+def modelRunsPersonalGridSearch(DATASET, c):
+    """ Conduct grid search for personalised algorithms over the LR anf regularization parameter
+     Note to self - update code to have this flexibily included in model runs """
+    DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST = set_parameters_for_dataset(DATASET)
+    #excuse the laziness ;)
+    scores = {'pfedme':{},
+              'ditto':{}}
+    X1, y1 = loadData(DATASET, DATA_DIR, 1, c)
+    X2, y2 = loadData(DATASET, DATA_DIR, 2, c)
+    LR_try = [1e-1, 5e-2, 1e-2, 5e-3]
+    REG_try = [1e-3, 1e-2, 1e-1, 5e-1, 1]
+    OPTIM_try = ['ADM', 'SGD']
+    for OPTIM in OPTIM_try:
+        scores['pfedme'][OPTIM] = {}
+        scores['ditto'][OPTIM] = {}
+        for LR in LR_try:
+            for REG in REG_try:
+                scores['pfedme'][OPTIM][(LR, REG)] = []
+                scores['ditto'][OPTIM][(LR, REG)] = []
+                for _ in range(RUNS):
+                    #pfedme
+                    arch = 'pfedme'
+                    model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                    dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                    site_1 = dataloader.preprocess(X1, y1)
+                    site_2 = dataloader.preprocess(X2, y2)
+                    trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme = True, pfedme_reg = REG)
+                    trainer.set_loader(site_1, site_2)
+                    score, test_loss, val_loss, train_loss = trainer.run()
+                    scores[arch][OPTIM][(LR, REG)].append(score)
+                    #ditto
+                    arch = 'ditto'
+                    model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS, LR, OPTIM)
+                    dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+                    site_1 = dataloader.preprocess(X1, y1)
+                    site_2 = dataloader.preprocess(X2, y2)
+                    trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, REG)
+                    trainer.set_loader(site_1, site_2)
+                    score, test_loss, val_loss, train_loss = trainer.run()
+                    scores[arch][OPTIM][(LR, REG)].append(score)
+    return scores
+
+
+def runAnalysis(DATASET, costs, tuning_type = 'all'):
     results_scores = {}
-    if f'{DATASET}_hyperparameter_search.pkl' in os.listdir(f'{ROOT_DIR}/results/'):
-        with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'rb') as f:
-            results_scores = pickle.load(f)
-    costs = list(set(costs)- set(list(results_scores.keys())))
+    if tuning_type == 'all':
+        if f'{DATASET}_hyperparameter_search.pkl' in os.listdir(f'{ROOT_DIR}/results/'):
+            with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'rb') as f:
+                results_scores = pickle.load(f)
+        costs = list(set(costs)- set(list(results_scores.keys())))
+        
+        for c in costs:
+            results_scores[c] =  modelRuns(DATASET, c)
+            with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'wb') as f:
+                pickle.dump(results_scores, f)
     
-    for c in costs:
-        results_scores[c] =  modelRuns(DATASET, c)
-        with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'wb') as f:
-            pickle.dump(results_scores, f)
+    elif tuning_type == 'personal':
+        if f'{DATASET}_hyperparameter_search_personal.pkl' in os.listdir(f'{ROOT_DIR}/results/'):
+            with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search_personal.pkl', 'rb') as f:
+                results_scores = pickle.load(f)
+        costs = list(set(costs)- set(list(results_scores.keys())))
+        
+        for c in costs:
+            results_scores[c] =  modelRunsPersonalGridSearch(DATASET, c)
+            with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search_personal.pkl', 'wb') as f:
+                pickle.dump(results_scores, f)
     return results_scores

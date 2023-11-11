@@ -28,13 +28,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-ds", "--dataset")
     parser.add_argument("-hp", "--hyperparameter", default = 'False')
+    parser.add_argument("-tt", "--tuningtype", default = 'all')
     args = parser.parse_args()
     DATASET = args.dataset
     costs = costs_dict[DATASET]
     if args.hyperparameter == 'False':
         results_scores, results_train_losses, results_val_losses, results_test_losses = pp.runAnalysis(DATASET, costs)
     else:
-        results_scores = hp.runAnalysis(DATASET, costs)
+        results_scores = hp.runAnalysis(DATASET, costs, args.tuningtype)
     
 if __name__ == "__main__":
     main()

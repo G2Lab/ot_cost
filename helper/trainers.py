@@ -324,22 +324,20 @@ class DittoModelTrainer(FederatedModelTrainer):
                     y = y.long()
                 outputs = model_site_p(x.float())
                 loss = criterion_p(outputs, y)
-                loss = self.ditto_loss(model_site, model_site_p, loss)
                 train_loss += loss.item()
                 loss.backward()
+                self.ditto_grad_adjustment(model_site, model_site_p)
                 optimizer_site_p.step()
                 self.combined_scheduler(lr_scheduler_site_p)
                 self.step += 1
             train_loss /= len(train_loader)
         return train_loss
     
-    def ditto_loss(self, model_site, model_site_p, loss):
-        regularization_loss = 0
+    def ditto_grad_adjustment(self, model_site, model_site_p):
         for p, g_p in zip(model_site_p.parameters(), model_site.parameters()):
-            regularization_loss += torch.norm(p - g_p)
-        regularization_loss = self.reg * regularization_loss
-        loss += regularization_loss
-        return loss
+            if p.grad is not None:
+                 p.grad += self.reg * (p.data - g_p.data)
+        
 
     def run(self):
         train_losses = []
@@ -349,9 +347,9 @@ class DittoModelTrainer(FederatedModelTrainer):
         for epoch in range(self.EPOCHS):
             _ = self.train_one_epoch('1s')
             _ =  self.train_one_epoch('2s')
-            self.fed_avg('1s', '2s' )
             train_loss = self.train_site_personal_epoch(1)
             train_loss +=  self.train_site_personal_epoch(2)
+            self.fed_avg('1s', '2s' )
             train_losses.append(train_loss)
             val_loss = self.validate(1)
             val_loss += self.validate(2)

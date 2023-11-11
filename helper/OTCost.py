@@ -101,13 +101,31 @@ class OTCost:
         return ot_cost
 
 
-def get_normal_params(part_data):
-    mu = np.mean(part_data, axis=0)
-    sigma = np.cov(part_data, rowvar=False)
-    if sigma.shape[0] != sigma.shape[1]:
-        print("The matrix is not square!")
-        print(sigma)
-    return mu, sigma
+def get_normal_params(part_data, private = False):
+    if not private:
+        mu = np.mean(part_data, axis=0)
+        sigma = np.cov(part_data, rowvar=False)
+        if sigma.shape[0] != sigma.shape[1]:
+            print("The matrix is not square!")
+            print(sigma)
+        return mu, sigma
+    else:
+        #privacy params
+        t = 5
+        rhos = [0.1 for _ in range(t)]
+        beta = 0.01
+        #Get mean
+        initial_center = part_data.mean(axis = 0) #Initialise centers using true values - allowed as we have access to full dataset as data owner
+        initial_radius = 1
+        mu_dp = MVMREC(part_data, initial_center, initial_radius, t, rhos, beta)
+        #Get DP Covariance
+        true_cov = np.cov((part_data - initial_center).T) #Initialise centers using true values - allowed as we have access to full dataset as data owner
+        sigma_dp = MVCREC(part_data, true_cov, t, rhos, beta)
+        if sigma_dp.shape[0] != sigma_dp.shape[1]:
+            print("The matrix is not square!")
+            print(sigma_dp)
+        return mu_dp, sigma_dp
+
 
 def hellinger_distance(mu_1, sigma_1, mu_2, sigma_2):
     # Recontstuct PSD matrix from covariance (as original unstable)
@@ -217,5 +235,75 @@ def privateDotproduct(data, index_i, index_j):
     return 1 - dot_product
 
 
+################## PRIVATE SUMMARY STATISTICS TAKEN FROM BISWAS ET AL 2020, COINPRESS  ################## 
+
+def project_to_ball(X, center, radius):
+    """Project data points to a ball with specified center and radius."""
+    return np.clip(X, center - radius, center + radius)
+
+def add_gaussian_noise(mean, variance, dimension, n_samples, rho):
+    """Add Gaussian noise for differential privacy."""
+    noise_scale = np.sqrt(2 * variance**2 * dimension / (n_samples**2 * rho)**2)
+    noise = np.random.normal(0, noise_scale, dimension)
+    return mean + noise
+
+def MVM(X, center, radius, rho, beta):
+    """One iteration of the MVM subroutine."""
+    dimension = X.shape[1]
+    n_samples = X.shape[0]
+    gamma = radius / dimension + 2 * np.sqrt(dimension * np.log(n_samples / beta)) + 2 * np.log(n_samples / beta)
+    projected_X = project_to_ball(X, center, radius + gamma)
+    Z = np.mean(projected_X, axis=0)
+    noisy_mean = add_gaussian_noise(Z, radius + gamma, dimension, n_samples, rho)
+    new_radius = gamma * np.sqrt(1 / n_samples) + 2 * (radius + gamma)**2 / (n_samples**2 * rho)
+    return noisy_mean, new_radius
+
+def MVMREC(X, initial_center, initial_radius, t, rhos, beta):
+    """The MVMREC algorithm."""
+    center, radius = initial_center, initial_radius
+    for i in range(t - 1):
+        center, radius = MVM(X, center, radius, rhos[i], beta / (4 * (t - 1)))
+    center, _ = MVM(X, center, radius, rhos[-1], beta / 4)
+    return center
 
 
+def calculate_K(true_cov):
+    """Calculate the upper bound K based on the actual covariance matrix."""
+    eigenvalues = np.linalg.eigvals(true_cov)
+    return np.max(eigenvalues)
+
+def project_to_ellipsoid(X, A, gamma):
+    """Project data points into an ellipsoid defined by matrix A and radius gamma."""
+    return np.array([x if np.linalg.norm(A @ x) <= gamma else gamma * x / np.linalg.norm(A @ x) for x in X])
+
+def empirical_covariance(X):
+    """Compute the empirical covariance of the data."""
+    mean = np.mean(X, axis=0)
+    centered_data = X - mean
+    return np.dot(centered_data.T, centered_data) / len(centered_data)
+
+def add_gaussian_noise_to_covariance(covariance, delta, d, rho):
+    """Add Gaussian noise to the covariance matrix for differential privacy."""
+    noise = np.random.normal(0, np.sqrt(2*delta**2 / rho), (d, d))
+    noise = (rho**2) * (noise + noise.T) / 2  # Making the noise symmetric
+    return covariance + noise
+
+def MVC(X, A, rho_s, beta_s):
+    """One step of the MVC subroutine."""
+    d = X.shape[1]
+    n = X.shape[0]
+    gamma = np.sqrt(d) + 2 * np.sqrt(d * np.log(n / beta_s)) + 2 * np.log(n / beta_s)
+    projected_X = project_to_ellipsoid(X, A, gamma)
+    empirical_cov = empirical_covariance(projected_X)
+    delta = np.sqrt(2 * gamma**2 / n)
+    noised_cov = add_gaussian_noise_to_covariance(empirical_cov, delta, d, rho_s)
+    return noised_cov
+
+def MVCREC(X, true_cov, t, rhos, beta):
+    """The MVCREC algorithm."""
+    d = X.shape[1]
+    K = calculate_K(true_cov)
+    A = np.sqrt(1 / K) * np.eye(d)
+    for i in range(t):
+        noised_cov = MVC(X, A, rhos[i], beta / (4 * t))
+    return noised_cov

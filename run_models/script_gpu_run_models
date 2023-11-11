@@ -1,5 +1,5 @@
 #! /usr/bin/bash
-#SBATCH --job-name=CIFAR    
+#SBATCH --job-name=IXITiny   
 #SBATCH --partition=gpu
 #SBATCH --exclusive
 #SBATCH --mail-type=ALL
@@ -15,5 +15,5 @@ conda activate cuda_env
 module load cuda
 
 DIR='/gpfs/commons/groups/gursoy_lab/aelhussein/ot_cost/otcost_fl_rebase'
-DATASET='CIFAR'
-python $DIR/code/run_models/run.py --dataset=$DATASET --hyperparameter=False
+DATASET='IXITiny'
+python $DIR/code/run_models/run.py --dataset=$DATASET --hyperparameter=True --tuningtype=personal

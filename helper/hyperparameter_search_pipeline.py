@@ -313,7 +313,7 @@ def modelRunsPersonalGridSearch(DATASET, c):
               'ditto':{}}
     X1, y1 = loadData(DATASET, DATA_DIR, 1, c)
     X2, y2 = loadData(DATASET, DATA_DIR, 2, c)
-    LR_try = [1e-1, 5e-2, 1e-2, 5e-3]
+    LR_try = [1e-1, 1e-2, 5e-3]
     REG_try = [1e-3, 1e-2, 1e-1, 5e-1, 1]
     OPTIM_try = ['ADM', 'SGD']
     for OPTIM in OPTIM_try:
@@ -347,9 +347,9 @@ def modelRunsPersonalGridSearch(DATASET, c):
     return scores
 
 
-def runAnalysis(DATASET, costs, tuning_type = 'all'):
+def runAnalysis(DATASET, costs, personal = 'False'):
     results_scores = {}
-    if tuning_type == 'all':
+    if personal == 'False':
         if f'{DATASET}_hyperparameter_search.pkl' in os.listdir(f'{ROOT_DIR}/results/'):
             with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'rb') as f:
                 results_scores = pickle.load(f)
@@ -360,7 +360,7 @@ def runAnalysis(DATASET, costs, tuning_type = 'all'):
             with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search.pkl', 'wb') as f:
                 pickle.dump(results_scores, f)
     
-    elif tuning_type == 'personal':
+    elif personal == 'True':
         if f'{DATASET}_hyperparameter_search_personal.pkl' in os.listdir(f'{ROOT_DIR}/results/'):
             with open(f'{ROOT_DIR}/results/{DATASET}_hyperparameter_search_personal.pkl', 'rb') as f:
                 results_scores = pickle.load(f)

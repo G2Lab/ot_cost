@@ -3,6 +3,8 @@
 
 import numpy as np
 np.warnings.filterwarnings('ignore', category=RuntimeWarning)
+import warnings
+warnings.filterwarnings("default", category=UserWarning)
 from itertools import product
 import ot
 from sklearn.preprocessing import normalize
@@ -111,7 +113,7 @@ def get_normal_params(part_data, private = False):
         return mu, sigma
     else:
         #privacy params
-        t = 5
+        t = 1
         rhos = [0.1 for _ in range(t)]
         beta = 0.01
         #Get mean

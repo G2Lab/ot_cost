@@ -14,11 +14,13 @@ importlib.reload(dp)
 from sklearn import metrics
 import torch.nn.functional as F
 from scipy.spatial.distance import cosine
+from torch.cuda.amp import autocast, GradScaler
 
 SQUEEZE = ['Synthetic', 'Credit']
 LONG = ['EMNIST', 'CIFAR', 'ISIC']
 CLASS_ADJUST = ['EMNIST', 'CIFAR']
 TENSOR = ['IXITiny']
+LARGE = ['IXITiny', 'ISIC']
 CONTINUOUS_OUTCOME = ['Weather']
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -83,9 +85,12 @@ class ModelTrainer:
             exp_scheduler.step()
 
     def train_one_epoch(self, site = None):
+        if self.DATASET in LARGE:
+            scaler = GradScaler()
         model, criterion, optimizer, lr_scheduler, train_loader, _, _ = self.get_objects(site)
         model.train()
         train_loss = 0
+        loss = 0
         for x, y in train_loader:
             x, y = x.to(self.device), y.to(self.device)
             optimizer.zero_grad()
@@ -94,14 +99,18 @@ class ModelTrainer:
                 y = y.unsqueeze(1)
             elif self.DATASET in LONG:
                 y = y.long()
-            loss = criterion(outputs, y)
+            
+            batch_loss = criterion(outputs, y)
+            if self.DATASET in LARGE:
+                batch_loss = scaler.scale(batch_loss)
+            loss += batch_loss
             if self.pfedme:
-                loss = self.pfedme_loss(site, loss)
-            loss.backward()
-            optimizer.step()
-            self.combined_scheduler(lr_scheduler)
-            self.step +=1
-            train_loss += loss.item()
+                loss += self.pfedme_loss(site, loss) #changed to
+        loss.backward() #moved outside of batch
+        train_loss += loss.item()
+        optimizer.step()
+        self.combined_scheduler(lr_scheduler)
+        self.step +=1     
         return train_loss / len(train_loader)
 
     def validate(self, site = None):
@@ -205,7 +214,8 @@ class FederatedModelTrainer(ModelTrainer):
         self.pfedme_reg = pfedme_reg
         self.ROUNDS = 1
         self.gradient_diversity_metric = []
-        self.gradient_diversity_cosine = []
+        self.weight_divergence = []
+        self.weight_divergence_orient = []
 
     def set_loader(self, site_1_data, site_2_data):
         self.train_loader_1, self.val_loader_1, self.test_loader_1 = site_1_data
@@ -246,7 +256,7 @@ class FederatedModelTrainer(ModelTrainer):
         #if basic fedavg then update local models
         if not self.pfedme:
             if not self.ditto:
-                self.gradient_diversity(model_1, model_2)
+                self.divergence_metrics(model_1, model_2)
             model_1.load_state_dict(model.state_dict())
             model_2.load_state_dict(model.state_dict())  
             assert self.compare_state_dicts(model.state_dict(), model_1.state_dict()) and self.compare_state_dicts(model.state_dict(), model_2.state_dict()), "The model weights are not identical."
@@ -262,25 +272,40 @@ class FederatedModelTrainer(ModelTrainer):
         loss += regularization_loss
         return loss
     
-    def gradient_diversity(self, model_1, model_2):
-        #Get model gradients
+    def divergence_metrics(self, model_1, model_2):
+        #Get model weights and  gradients
         grads = {'model_1': [], 'model_2':[]}
+        weights = {'model_1': [], 'model_2':[]}
+
         for name, param in model_1.named_parameters():
                 if param.requires_grad:
-                    grads['model_1'].append(param.grad.clone().detach())
+                    w = param.data.clone().detach()
+                    g = param.grad.clone().detach()
+                    weights['model_1'].append(w / torch.norm(w)  if torch.norm(w) != 0 else w) #normalise to handle layers with different magnitude parameters/grads
+                    grads['model_1'].append(g / torch.norm(g) if torch.norm(g) != 0 else g )
         for name, param in model_2.named_parameters():
-                if param.requires_grad:  
-                    grads['model_2'].append(param.grad.clone().detach())
+                if param.requires_grad:
+                    w = param.data.clone().detach()
+                    g = param.grad.clone().detach()
+                    weights['model_2'].append(w / torch.norm(w)  if torch.norm(w) != 0 else w)  
+                    grads['model_2'].append(g / torch.norm(g)if torch.norm(g) != 0 else g )
         #wrangle
+        model_1_w = torch.cat([w.flatten() for w in weights['model_1']])
+        model_2_w = torch.cat([w.flatten() for w in weights['model_2']])
         model_1_g = torch.cat([w.flatten() for w in grads['model_1']])
         model_2_g = torch.cat([w.flatten() for w in grads['model_2']])
+        
+        #calculate weight divergence
+        weight_div = torch.norm(model_1_w - model_2_w) / torch.norm(model_1_w)
+        weight_div_orient = torch.dot(model_1_w, model_2_w) / (torch.norm(model_1_w) * torch.norm(model_2_w))
+        self.weight_divergence.append(weight_div.cpu().numpy().reshape(1)[0])
+        self.weight_divergence_orient.append(weight_div_orient.cpu().numpy().reshape(1)[0])
+        
         #calculate diversity
         num = torch.norm(model_1_g)**2  + torch.norm(model_2_g)**2
         denom = torch.norm(model_1_g + model_2_g)**2
         gradient_diversity_metric = (num/ denom).cpu().numpy().reshape(1)[0]
         self.gradient_diversity_metric.append(gradient_diversity_metric)
-        cosine_gradient_diversity = cosine(model_1_g.cpu().numpy().astype(float), model_2_g.cpu().numpy().astype(float))
-        self.gradient_diversity_cosine.append(cosine_gradient_diversity)
         return
 
     def run(self):

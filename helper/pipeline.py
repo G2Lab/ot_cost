@@ -251,19 +251,33 @@ def get_dice_loss(output, target, SPATIAL_DIMENSIONS = (2, 3, 4), epsilon=1e-9):
     dice_score = num / denom
     return torch.mean(1 - dice_score)
 
-def modelRuns(DATASET, c, scores, test_losses, val_losses, train_losses, gradient_diversity):
+
+def getRegParam(DATASET, architecture, c):
+    if DATASET == 'Synthetic':
+        REG_PARAM_dict = hp.Synthetic_REG_PARAM_dict[c]
+    elif DATASET == 'Credit':
+        REG_PARAM_dict = hp.Credit_REG_PARAM_dict[c]
+    elif DATASET == 'Weather':
+        REG_PARAM_dict = hp.Weather_REG_PARAM_dict[c]
+    elif DATASET == 'EMNIST':
+        REG_PARAM_dict = hp.EMNIST_REG_PARAM_dict[c]
+    elif DATASET == 'CIFAR':
+        REG_PARAM_dict = hp.CIFAR_REG_PARAM_dict[c]
+    elif DATASET == 'IXITiny':
+        REG_PARAM_dict = hp.IXITiny_REG_PARAM_dict[c]
+    elif DATASET == 'ISIC':
+        REG_PARAM_dict = hp.ISIC_REG_PARAM_dict[c]
+    return REG_PARAM_dict[architecture]
+
+
+def modelRuns(DATASET, c, scores, test_losses, val_losses, train_losses, divergence_metrics):
     DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST = set_parameters_for_dataset(DATASET)
-    #scores = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    #test_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    #val_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    #train_losses = {'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]}
-    #gradient_diversity = {'metric':[], 'cosine': []}
     X1, y1 = loadData(DATASET, DATA_DIR, 1, c)
     X2, y2 = loadData(DATASET, DATA_DIR, 2, c)
 
     for _ in range(RUNS):
         #single
-        arch = 'single'
+        """ arch = 'single'
         model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
         dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
         site_1 = dataloader.preprocess(X1, y1)
@@ -280,7 +294,7 @@ def modelRuns(DATASET, c, scores, test_losses, val_losses, train_losses, gradien
         trainer = tr.ModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
         trainer.set_loader(site_joint)
         score, test_loss, val_loss, train_loss = trainer.run()
-        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss)  """
 
         #federated
         arch = 'federated'
@@ -292,16 +306,18 @@ def modelRuns(DATASET, c, scores, test_losses, val_losses, train_losses, gradien
         trainer.set_loader(site_1, site_2)
         score, test_loss, val_loss, train_loss = trainer.run()
         scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
-        #gradient_diversity['metric'] = trainer.gradient_diversity_metric
-        #gradient_diversity['cosine'] = trainer.gradient_diversity_cosine
+        divergence_metrics['grad_div'].append(trainer.gradient_diversity_metric), divergence_metrics['weight_div'].append(trainer.weight_divergence), divergence_metrics['weight_div_orient'].append(trainer.weight_divergence_orient)
+
 
         #pfedme
-        arch = 'pfedme'
+        """ arch = 'pfedme'
         model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        reg_param = getRegParam(DATASET, arch, c)
+        pfedme = True
         dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
         site_1 = dataloader.preprocess(X1, y1)
         site_2 = dataloader.preprocess(X2, y2)
-        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme = True)
+        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme, reg_param)
         trainer.set_loader(site_1, site_2)
         score, test_loss, val_loss, train_loss = trainer.run()
         scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
@@ -309,57 +325,143 @@ def modelRuns(DATASET, c, scores, test_losses, val_losses, train_losses, gradien
         #ditto
         arch = 'ditto'
         model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        reg_param = getRegParam(DATASET, arch, c)
         dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
         site_1 = dataloader.preprocess(X1, y1)
         site_2 = dataloader.preprocess(X2, y2)
-        trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE)
+        trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, reg_param)
+        trainer.set_loader(site_1, site_2)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss)  """
+
+    return scores, train_losses, val_losses, test_losses, divergence_metrics
+
+
+def modelRunsPersonal(DATASET, c, scores, test_losses, val_losses, train_losses):
+    """ Quick fix to run the personalised algorithms again - Combine with full function eventually """
+    DATA_DIR, EPOCHS, WARMUP_STEPS, BATCH_SIZE, RUNS, METRIC_TEST = set_parameters_for_dataset(DATASET)
+    X1, y1 = loadData(DATASET, DATA_DIR, 1, c)
+    X2, y2 = loadData(DATASET, DATA_DIR, 2, c)
+
+    for _ in range(RUNS):
+        #pfedme
+        arch = 'pfedme'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        reg_param = getRegParam(DATASET, arch, c)
+        pfedme = True
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_1 = dataloader.preprocess(X1, y1)
+        site_2 = dataloader.preprocess(X2, y2)
+        trainer = tr.FederatedModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, pfedme, reg_param)
         trainer.set_loader(site_1, site_2)
         score, test_loss, val_loss, train_loss = trainer.run()
         scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
 
-    return scores, train_losses, val_losses, test_losses, gradient_diversity
+        #ditto
+        arch = 'ditto'
+        model, criterion, optimizer, lr_scheduler = createModel(DATASET, arch,c, WARMUP_STEPS)
+        reg_param = getRegParam(DATASET, arch, c)
+        dataloader = dp.DataPreprocessor(DATASET, BATCH_SIZE)
+        site_1 = dataloader.preprocess(X1, y1)
+        site_2 = dataloader.preprocess(X2, y2)
+        trainer = tr.DittoModelTrainer(EPOCHS, WARMUP_STEPS, DATASET, model, criterion, optimizer, lr_scheduler, DEVICE, reg_param)
+        trainer.set_loader(site_1, site_2)
+        score, test_loss, val_loss, train_loss = trainer.run()
+        scores[arch].append(score), test_losses[arch].append(test_loss), val_losses[arch].append(val_loss), train_losses[arch].append(train_loss) 
 
-def runAnalysis(DATASET, costs):
-    results_scores = {}
-    results_train_losses = {}
-    results_val_losses = {}
-    results_test_losses = {}
-    gradient_diversities = {}
+    return scores, train_losses, val_losses, test_losses
 
-    if f'{DATASET}_scores_full.pkl' in os.listdir(f'{ROOT_DIR}/results/{DATASET}'):
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_scores_full.pkl', 'rb') as f:
-            results_scores = pickle.load(f)
+def runAnalysis(DATASET, costs, personal = False):
+    if not personal:
+        results_scores ={c:{'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]} for c in costs}
+        results_test_losses = {c:{'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]} for c in costs}
+        results_val_losses = {c:{'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]} for c in costs}
+        results_train_losses ={c:{'single':[], 'joint':[], 'federated':[], 'pfedme':[], 'ditto':[]} for c in costs}
+        divergence_metrics = {c:{'weight_div':[], 'grad_div': [], 'weight_div_orient':[]} for c in costs}
 
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_train_losses_full.pkl', 'rb') as f:
-            results_train_losses = pickle.load(f)
+        """ if f'{DATASET}_scores_full.pkl' in os.listdir(f'{ROOT_DIR}/results/{DATASET}'):
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_scores_full.pkl', 'rb') as f:
+                results_scores_done = pickle.load(f)
+                results_scores.update(results_scores_done)
+
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_train_losses_full.pkl', 'rb') as f:
+                results_train_losses_done = pickle.load(f)
+                results_train_losses.update(results_train_losses_done)
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_val_losses_full.pkl', 'rb') as f:
+                results_val_losses_done = pickle.load(f)
+                results_val_losses.update(results_val_losses_done)
+
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_test_losses_full.pkl', 'rb') as f:
+                results_test_losses_done = pickle.load(f)
+                results_test_losses.update(results_test_losses_done)
+
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_divergence_metrics_full.pkl', 'rb') as f:
+                    divergence_metrics_done = pickle.load(f)
+                    divergence_metrics.update(divergence_metrics_done)
+
+            costs = list(set(costs)- set(list(results_scores_done.keys()))) """
+
+
+        for c in costs:
+            results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c], divergence_metrics[c] =  modelRuns(DATASET, c, results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c], divergence_metrics[c])
+            """ with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_scores_full.pkl', 'wb') as f:
+                pickle.dump(results_scores, f)
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_train_losses_full.pkl', 'wb') as f:
+                pickle.dump(results_train_losses, f)
+
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_val_losses_full.pkl', 'wb') as f:
+                pickle.dump(results_val_losses, f)
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_test_losses_full.pkl', 'wb') as f:
+                pickle.dump(results_test_losses, f) """
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_divergence_metrics_full.pkl', 'wb') as f:
+                pickle.dump(divergence_metrics, f)
+                
+        return results_scores, results_train_losses, results_val_losses, results_test_losses
+    
+    else:
+        results_scores ={c:{ 'pfedme':[], 'ditto':[]} for c in costs}
+        results_test_losses = {c:{ 'pfedme':[], 'ditto':[]} for c in costs}
+        results_val_losses = {c:{'pfedme':[], 'ditto':[]} for c in costs}
+        results_train_losses ={c:{ 'pfedme':[], 'ditto':[]} for c in costs}
+
+        if f'{DATASET}_scores_personal.pkl' in os.listdir(f'{ROOT_DIR}/results/{DATASET}'):
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_scores_personal.pkl', 'rb') as f:
+                results_scores_done = pickle.load(f)
+                results_scores.update(results_scores_done)
+
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_train_losses_personal.pkl', 'rb') as f:
+                results_train_losses_done = pickle.load(f)
+                results_train_losses.update(results_train_losses_done)
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_val_losses_personal.pkl', 'rb') as f:
+                results_val_losses_done = pickle.load(f)
+                results_val_losses.update(results_val_losses_done)
+
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_test_losses_personal.pkl', 'rb') as f:
+                results_test_losses_done = pickle.load(f)
+                results_test_losses.update(results_test_losses_done)
+
+            costs = list(set(costs)- set(list(results_scores_done.keys())))
         
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_val_losses_full.pkl', 'rb') as f:
-            results_val_losses = pickle.load(f)
 
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_test_losses_full.pkl', 'rb') as f:
-            results_test_losses = pickle.load(f)
+        for c in costs:
+            results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c] =  modelRunsPersonal(DATASET, c, results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c])
 
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_gradient_diversities_full.pkl', 'rb') as f:
-                gradient_diversities = pickle.load(f)
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_scores_personal.pkl', 'wb') as f:
+                pickle.dump(results_scores, f)
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_train_losses_personal.pkl', 'wb') as f:
+                pickle.dump(results_train_losses, f)
 
-    #costs = list(set(costs)- set(list(results_scores.keys())))
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_val_losses_personal.pkl', 'wb') as f:
+                pickle.dump(results_val_losses, f)
+            
+            with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_test_losses_personal.pkl', 'wb') as f:
+                pickle.dump(results_test_losses, f)
+            
 
-    for c in costs:
-        results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c], gradient_diversities[c] =  modelRuns(DATASET, c, results_scores[c], results_train_losses[c], results_val_losses[c], results_test_losses[c], gradient_diversities[c])
-
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_scores_full.pkl', 'wb') as f:
-            pickle.dump(results_scores, f)
-        
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_train_losses_full.pkl', 'wb') as f:
-            pickle.dump(results_train_losses, f)
-
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_val_losses_full.pkl', 'wb') as f:
-            pickle.dump(results_val_losses, f)
-        
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_test_losses_full.pkl', 'wb') as f:
-            pickle.dump(results_test_losses, f)
-        
-        with open(f'{ROOT_DIR}/results/{DATASET}/{DATASET}_gradient_diversities_full.pkl', 'wb') as f:
-            pickle.dump(gradient_diversities, f)
-
-    return results_scores, results_train_losses, results_val_losses, results_test_losses
+        return results_scores, results_train_losses, results_val_losses, results_test_losses

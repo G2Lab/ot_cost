@@ -13,7 +13,7 @@ importlib.reload(mh)
 importlib.reload(tr)
 importlib.reload(dp)
 import argparse
-
+import ast
 
 costs_dict = {'Synthetic': [0.03, 0.10, 0.20, 0.30, 0.40, 0.50],
               'Credit': [0.12, 0.23, 0.30, 0.40],
@@ -28,14 +28,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-ds", "--dataset")
     parser.add_argument("-hp", "--hyperparameter", default = 'False')
-    parser.add_argument("-tt", "--tuningtype", default = 'all')
+    parser.add_argument("-ps", "--personal", default = 'False')
     args = parser.parse_args()
     DATASET = args.dataset
     costs = costs_dict[DATASET]
-    if args.hyperparameter == 'False':
-        results_scores, results_train_losses, results_val_losses, results_test_losses = pp.runAnalysis(DATASET, costs)
+    hyperparameter = ast.literal_eval(args.hyperparameter)
+    personal = ast.literal_eval(args.personal)
+    if not hyperparameter:
+        results_scores, results_train_losses, results_val_losses, results_test_losses = pp.runAnalysis(DATASET, costs, personal)
     else:
-        results_scores = hp.runAnalysis(DATASET, costs, args.tuningtype)
+        results_scores = hp.runAnalysis(DATASET, costs, personal)
     
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-# ot_cost
+# A Universal Metric of Dataset Similarity for Cross-silo Federated Learning
 Dataset downloads:
 - CREDIT: https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
 - WEATHER: https://research.yandex.com/shifts/weather

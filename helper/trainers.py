@@ -14,13 +14,11 @@ importlib.reload(dp)
 from sklearn import metrics
 import torch.nn.functional as F
 from scipy.spatial.distance import cosine
-from torch.cuda.amp import autocast, GradScaler
 
 SQUEEZE = ['Synthetic', 'Credit']
 LONG = ['EMNIST', 'CIFAR', 'ISIC']
 CLASS_ADJUST = ['EMNIST', 'CIFAR']
 TENSOR = ['IXITiny']
-LARGE = ['IXITiny', 'ISIC']
 CONTINUOUS_OUTCOME = ['Weather']
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -85,8 +83,6 @@ class ModelTrainer:
             exp_scheduler.step()
 
     def train_one_epoch(self, site = None):
-        if self.DATASET in LARGE:
-            scaler = GradScaler()
         model, criterion, optimizer, lr_scheduler, train_loader, _, _ = self.get_objects(site)
         model.train()
         train_loss = 0
@@ -99,16 +95,12 @@ class ModelTrainer:
                 y = y.unsqueeze(1)
             elif self.DATASET in LONG:
                 y = y.long()
-            
-            batch_loss = criterion(outputs, y)
-            if self.DATASET in LARGE:
-                batch_loss = scaler.scale(batch_loss)
-            loss += batch_loss
+            loss = criterion(outputs, y)
             if self.pfedme:
-                loss += self.pfedme_loss(site, loss) #changed to
-        loss.backward() #moved outside of batch
-        train_loss += loss.item()
-        optimizer.step()
+                loss += self.pfedme_loss(site, loss) 
+            loss.backward()
+            train_loss += loss.item()
+            optimizer.step()
         self.combined_scheduler(lr_scheduler)
         self.step +=1     
         return train_loss / len(train_loader)

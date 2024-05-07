@@ -12,6 +12,7 @@ done
 
 
 datasets=("EMNIST" "CIFAR" "IXITiny" "ISIC")
+datasets=("IXITiny" "ISIC")
 hyperparameter="False"
 personal="False"
 
